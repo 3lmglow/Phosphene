@@ -12,6 +12,7 @@ import { initializeDatabase, getDb, shutdownDatabase } from "../src/server/db/cl
 import { seedDatabase } from "../src/server/db/seed";
 import {
   appSettings,
+  auditLogs,
   pointLedger,
   proofAssets,
   rewardItems,
@@ -213,6 +214,102 @@ describe.sequential("Phosphene domain integration", () => {
     });
     expect(pausedAfterSubmission).toMatchObject({ active: false, affected_tasks: 0 });
     expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, taskId) }))?.status).toBe("submitted");
+  });
+
+  it("repairs pending occurrences left behind by the pre-fix pause behavior", async () => {
+    const pausedSeriesId = createId("series");
+    const pausedTaskId = createId("task");
+    const endedSeriesId = createId("series");
+    const endedTaskId = createId("task");
+    await getDb().insert(taskSeries).values([
+      {
+        id: pausedSeriesId,
+        title: "Legacy paused daily",
+        description: "",
+        difficulty: "easy",
+        basePoints: 3,
+        verificationMode: "self",
+        proofRequirement: "none",
+        recurrence: "daily",
+        startDate: today,
+        nextOccurrenceDate: addCalendarDays(today, 1),
+        dailyDeadlineTime: "23:59",
+        active: false,
+        createdBy: "AI"
+      },
+      {
+        id: endedSeriesId,
+        title: "Naturally ended daily",
+        description: "",
+        difficulty: "easy",
+        basePoints: 3,
+        verificationMode: "self",
+        proofRequirement: "none",
+        recurrence: "daily",
+        startDate: today,
+        nextOccurrenceDate: addCalendarDays(today, 1),
+        endDate: today,
+        dailyDeadlineTime: "23:59",
+        active: false,
+        createdBy: "AI"
+      }
+    ]);
+    await getDb().insert(tasks).values([
+      {
+        id: pausedTaskId,
+        seriesId: pausedSeriesId,
+        occurrenceDate: today,
+        title: "Legacy paused daily",
+        description: "",
+        type: "daily",
+        difficulty: "easy",
+        basePoints: 3,
+        status: "pending",
+        verificationMode: "self",
+        proofRequirement: "none",
+        source: "recurring",
+        revealMode: "immediate",
+        revealedAt: new Date(),
+        deadlineAt: new Date(Date.now() + 86_400_000)
+      },
+      {
+        id: endedTaskId,
+        seriesId: endedSeriesId,
+        occurrenceDate: today,
+        title: "Naturally ended daily",
+        description: "",
+        type: "daily",
+        difficulty: "easy",
+        basePoints: 3,
+        status: "pending",
+        verificationMode: "self",
+        proofRequirement: "none",
+        source: "recurring",
+        revealMode: "immediate",
+        revealedAt: new Date(),
+        deadlineAt: new Date(Date.now() + 86_400_000)
+      }
+    ]);
+    await getDb().insert(auditLogs).values({
+      id: createId("audit"),
+      actor: "AI",
+      action: "task_series.paused",
+      entityType: "task_series",
+      entityId: pausedSeriesId,
+      summary: "Paused before immediate cancellation was implemented"
+    });
+
+    await seedDatabase();
+    const reconciled = await reconcileSystem();
+    expect(reconciled.paused_cancelled).toBe(1);
+    expect(
+      (await getDb().query.taskSeries.findFirst({ where: eq(taskSeries.id, pausedSeriesId) }))?.pausedAt
+    ).toBeInstanceOf(Date);
+    expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, pausedTaskId) }))?.status).toBe("cancelled");
+    expect(
+      (await getDb().query.taskSeries.findFirst({ where: eq(taskSeries.id, endedSeriesId) }))?.pausedAt
+    ).toBeNull();
+    expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, endedTaskId) }))?.status).toBe("pending");
   });
 
   it("requires and exposes a rejection reason with the rejected submission", async () => {

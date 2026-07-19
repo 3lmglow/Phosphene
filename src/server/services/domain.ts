@@ -181,6 +181,26 @@ async function materializeSeries(tx: Db, through: string): Promise<number> {
   return created;
 }
 
+async function cancelPendingTasksFromPausedSeries(tx: Db, now: Date): Promise<number> {
+  const pausedSeries = await tx
+    .select({ id: taskSeries.id })
+    .from(taskSeries)
+    .where(and(eq(taskSeries.active, false), isNotNull(taskSeries.pausedAt)));
+  if (!pausedSeries.length) return 0;
+
+  const cancelled = await tx
+    .update(tasks)
+    .set({ status: "cancelled", failureReason: SERIES_PAUSED_TASK_REASON, updatedAt: now })
+    .where(
+      and(
+        inArray(tasks.seriesId, pausedSeries.map((series: any) => series.id)),
+        eq(tasks.status, "pending")
+      )
+    )
+    .returning({ id: tasks.id });
+  return cancelled.length;
+}
+
 async function addLedger(
   tx: Db,
   entry: {
@@ -450,6 +470,7 @@ async function reconcileInTransaction(tx: Db, now = new Date()) {
   const settings = await getSettings(tx);
   const today = localDate(now, settings.timezone);
   const generated = await materializeSeries(tx, today);
+  const pausedCancelled = await cancelPendingTasksFromPausedSeries(tx, now);
   const overdue = await tx.query.tasks.findMany({
     where: and(eq(tasks.status, "pending"), lte(tasks.deadlineAt, now))
   });
@@ -460,14 +481,15 @@ async function reconcileInTransaction(tx: Db, now = new Date()) {
       .where(eq(tasks.id, task.id));
     await applyPenalty(tx, task, "system", "Task expired", now);
   }
-  if (generated || overdue.length) {
+  if (generated || overdue.length || pausedCancelled) {
     await audit(tx, "system", "system.reconciled", "system", null, "Recurring tasks and deadlines reconciled", {
       generated,
-      expired: overdue.length
+      expired: overdue.length,
+      pausedCancelled
     });
   }
   await recomputeActivityAndStats(tx, now);
-  return { generated, expired: overdue.length };
+  return { generated, expired: overdue.length, paused_cancelled: pausedCancelled };
 }
 
 export async function reconcileSystem(now = new Date()) {
@@ -620,6 +642,7 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
           .update(taskSeries)
           .set({
             active,
+            pausedAt: active ? null : now,
             nextOccurrenceDate: active ? resumeDate : series.nextOccurrenceDate,
             updatedAt: now
           })

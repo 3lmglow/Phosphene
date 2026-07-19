@@ -159,6 +159,7 @@ export const taskSeries = sqliteTable(
     endDate: text("end_date"),
     dailyDeadlineTime: text("daily_deadline_time").notNull().default("23:59"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
+    pausedAt: integer("paused_at", { mode: "timestamp_ms" }),
     createdBy: text("created_by", { enum: ACTORS }).notNull().default("AI"),
     relatedTaskId: text("related_task_id"),
     ...timestamps

@@ -102,9 +102,11 @@ type Task = {
   occurrenceDate?: string | null;
   submissions?: Array<{
     id: string;
+    attempt: number;
     proofText: string;
     status: string;
     submittedAt: string;
+    reviewedAt?: string | null;
     reviewReason?: string | null;
     assets: Array<{ id: string; width: number; height: number }>;
   }>;
@@ -540,7 +542,10 @@ function AppShell({
           <Route path="/tasks" element={<TasksPage aiLabel={bootstrap.ai_label} />} />
           <Route path="/rewards" element={<RewardsPage aiLabel={bootstrap.ai_label} />} />
           <Route path="/insights" element={<InsightsPage />} />
-          <Route path="/history" element={<HistoryPage aiLabel={bootstrap.ai_label} />} />
+          <Route
+            path="/history"
+            element={<HistoryPage aiLabel={bootstrap.ai_label} userLabel={bootstrap.user_label} />}
+          />
           <Route
             path="/settings"
             element={
@@ -900,14 +905,71 @@ function TaskDialog({
             <div><strong>这件事已经被好好完成</strong><span>{task.completionDate} · 获得 {pointsFor(task)} 积分</span></div>
           </div>
         )}
-        {latest?.assets?.length ? (
-          <div className="proof-gallery">
-            {latest.assets.map((asset) => <img key={asset.id} src={`/api/proofs/${asset.id}`} alt="任务证据" />)}
-          </div>
-        ) : null}
+        {task.submissions?.length ? <SubmissionHistory submissions={task.submissions} /> : null}
       </section>
     </div>
   );
+}
+
+function SubmissionHistory({ submissions }: { submissions: NonNullable<Task["submissions"]> }) {
+  return (
+    <section className="submission-history">
+      <header>
+        <div>
+          <span>RESPONSE</span>
+          <h3>提交记录</h3>
+        </div>
+        <em>{submissions.length} 次</em>
+      </header>
+      <div className="submission-history__list">
+        {submissions.map((submission) => {
+          const hasText = Boolean(submission.proofText.trim());
+          const hasImages = submission.assets.length > 0;
+          return (
+            <article className="submission-record" key={submission.id}>
+              <div className="submission-record__meta">
+                <strong>第 {submission.attempt} 次提交</strong>
+                <span className={`submission-record__status submission-record__status--${submission.status}`}>
+                  {submissionStatusLabel(submission.status)}
+                </span>
+                <time>{formatDate(submission.submittedAt, true)}</time>
+              </div>
+              {hasText && <p className="submission-record__text">{submission.proofText}</p>}
+              {hasImages && (
+                <div className="proof-gallery">
+                  {submission.assets.map((asset) => (
+                    <a
+                      key={asset.id}
+                      href={`/api/proofs/${asset.id}?variant=original`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="打开原始任务证据"
+                    >
+                      <img src={`/api/proofs/${asset.id}`} alt="任务证据" />
+                    </a>
+                  ))}
+                </div>
+              )}
+              {!hasText && !hasImages && (
+                <p className="submission-record__empty">这次是直接确认完成，没有附加文字或图片。</p>
+              )}
+              {submission.status === "rejected" && submission.reviewReason?.trim() && (
+                <p className="submission-record__review">打回理由：{submission.reviewReason}</p>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function submissionStatusLabel(status: string) {
+  return {
+    pending: "待确认",
+    approved: "已确认",
+    rejected: "已打回"
+  }[status] ?? status;
 }
 
 function proofLabel(value: string) {
@@ -1168,7 +1230,7 @@ const historyScopeCopy: Record<string, string> = {
 
 const summarizedLedgerTypes = new Set(["task_reward", "task_penalty", "redemption"]);
 
-function HistoryPage({ aiLabel }: { aiLabel: string }) {
+function HistoryPage({ aiLabel, userLabel }: { aiLabel: string; userLabel: string }) {
   const [kind, setKind] = useState("all");
   const { data, loading, error, refresh } = useLoad<any>(() => api(`/history?kind=${kind}&limit=100`), [kind]);
   const events = useMemo(() => {
@@ -1196,7 +1258,14 @@ function HistoryPage({ aiLabel }: { aiLabel: string }) {
       <p className="history-scope-note"><ShieldCheck size={15} />{historyScopeCopy[kind]}</p>
       {loading ? <PageLoader compact /> : error ? <PageError message={error} retry={refresh} /> : (
         <div className="timeline">
-          {events.length ? events.map((event: any, index: number) => <TimelineEvent key={`${event.eventKind}-${event.id}-${index}`} event={event} aiLabel={aiLabel} />) :
+          {events.length ? events.map((event: any, index: number) => (
+            <TimelineEvent
+              key={`${event.eventKind}-${event.id}-${index}`}
+              event={event}
+              aiLabel={aiLabel}
+              userLabel={userLabel}
+            />
+          )) :
             <EmptyState icon={<History />} title="时间线还是空的" copy="完成任务、获得积分或兑换奖励后，记录会出现在这里。" />}
         </div>
       )}
@@ -1204,7 +1273,7 @@ function HistoryPage({ aiLabel }: { aiLabel: string }) {
   );
 }
 
-function TimelineEvent({ event, aiLabel }: { event: any; aiLabel: string }) {
+function TimelineEvent({ event, aiLabel, userLabel }: { event: any; aiLabel: string; userLabel: string }) {
   let icon: ReactNode = <Sparkles />;
   let kindLabel = "记录";
   let title = "记录";
@@ -1238,8 +1307,8 @@ function TimelineEvent({ event, aiLabel }: { event: any; aiLabel: string }) {
   } else {
     icon = <ShieldCheck />;
     kindLabel = "审计";
-    title = auditActionLabel(event.action);
-    copy = `${auditActorLabel(event.actor, aiLabel)} · ${auditEntityLabel(event.entityType)}`;
+    title = auditActionLabel(event.action, userLabel);
+    copy = `${auditActorLabel(event.actor, aiLabel, userLabel)} · ${auditEntityLabel(event.entityType)}`;
   }
   return (
     <article className="timeline-event">
@@ -1264,8 +1333,8 @@ function formatLedgerReason(reason = "") {
   return reason || "系统记账";
 }
 
-function auditActorLabel(actor: string, aiLabel: string) {
-  return actor === "AI" ? aiLabel : actor === "user" ? "用户" : "系统";
+function auditActorLabel(actor: string, aiLabel: string, userLabel: string) {
+  return actor === "AI" ? aiLabel : actor === "user" ? userLabel : "系统";
 }
 
 function auditEntityLabel(entity: string) {
@@ -1280,7 +1349,7 @@ function auditEntityLabel(entity: string) {
   }[entity] ?? "记录";
 }
 
-function auditActionLabel(action: string) {
+function auditActionLabel(action: string, userLabel: string) {
   return {
     "task.created": "创建任务",
     "task.edited": "编辑任务",
@@ -1303,7 +1372,7 @@ function auditActionLabel(action: string) {
     "points.bonus": "发放额外积分",
     "points.penalty": "执行额外扣分",
     "points.correction": "校正积分账本",
-    "settings.updated": "更新用户设置",
+    "settings.updated": `更新${userLabel}的设置`,
     "system.reconciled": "完成系统日常结算"
   }[action] ?? "系统操作";
 }

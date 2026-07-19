@@ -1409,6 +1409,103 @@ svg {
   white-space: pre-wrap;
 }
 
+.submission-history {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.submission-history > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.submission-history > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.submission-history > header span {
+  color: var(--coral);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .18em;
+}
+
+.submission-history > header h3 {
+  margin: 0;
+  font: 500 18px var(--serif);
+}
+
+.submission-history > header em {
+  color: var(--ink-faint);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.submission-history__list {
+  margin-top: 11px;
+  display: grid;
+  gap: 9px;
+}
+
+.submission-record {
+  padding: 14px;
+  border: 1px solid rgba(94, 75, 112, .11);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .58);
+}
+
+.submission-record__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.submission-record__meta strong {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.submission-record__meta time {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+
+.submission-record__status {
+  padding: 3px 6px;
+  color: #776549;
+  border-radius: 20px;
+  background: #f4ead5;
+  font-size: 7px;
+}
+
+.submission-record__status--approved { color: #52705c; background: #e5f0e6; }
+.submission-record__status--rejected { color: #884f56; background: #f6e3e6; }
+
+.submission-record__text,
+.submission-record__empty,
+.submission-record__review {
+  margin: 10px 0 0;
+  font-size: 10px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.submission-record__text {
+  padding: 11px 12px;
+  color: var(--ink);
+  border-left: 2px solid rgba(113, 92, 142, .34);
+  border-radius: 2px 9px 9px 2px;
+  background: rgba(239, 235, 245, .72);
+}
+
+.submission-record__empty { color: var(--ink-faint); }
+.submission-record__review { color: #884f56; }
+
 .proof-gallery {
   margin-top: 15px;
   display: grid;
@@ -1416,7 +1513,14 @@ svg {
   gap: 7px;
 }
 
+.proof-gallery a {
+  display: block;
+  border-radius: 9px;
+  overflow: hidden;
+}
+
 .proof-gallery img {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;

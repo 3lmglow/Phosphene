@@ -15,6 +15,13 @@
       "when": 1784466690393,
       "tag": "0001_expand_punishment_intensity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784475171168,
+      "tag": "0002_add_task_series_pause_state",
+      "breakpoints": true
     }
   ]
 }

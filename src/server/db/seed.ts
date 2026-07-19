@@ -92,6 +92,33 @@ export async function seedDatabase(): Promise<void> {
         set active = 1
         where lower(cast(active as text)) in ('true', 't', 'yes')`
   );
+  // Older releases represented both a deliberate pause and a naturally ended
+  // series as active=false. Recover only deliberate pauses from the latest
+  // pause/resume audit event so their already-materialized tasks can be
+  // cancelled without touching a legitimate final occurrence.
+  await db.run(sql`
+    update task_series
+    set paused_at = (
+      select control.created_at
+      from audit_logs control
+      where control.entity_type = 'task_series'
+        and control.entity_id = task_series.id
+        and control.action in ('task_series.paused', 'task_series.resumed')
+      order by control.created_at desc, control.rowid desc
+      limit 1
+    )
+    where active = 0
+      and paused_at is null
+      and (
+        select control.action
+        from audit_logs control
+        where control.entity_type = 'task_series'
+          and control.entity_id = task_series.id
+          and control.action in ('task_series.paused', 'task_series.resumed')
+        order by control.created_at desc, control.rowid desc
+        limit 1
+      ) = 'task_series.paused'
+  `);
   const currentPresetIds = new Set<string>(PRESET_REWARDS.map((reward) => reward.id));
   const hiddenRewards = (await db.select().from(rewardItems))
     .filter((reward) => {

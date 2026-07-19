@@ -56,6 +56,7 @@ const timestampFields = new Set([
   "submittedAt",
   "completedAt",
   "expiredAt",
+  "pausedAt",
   "reviewedAt",
   "redeemedAt",
   "fulfilledAt",
