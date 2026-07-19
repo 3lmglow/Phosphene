@@ -10,11 +10,11 @@ import {
   Clock3,
   Coins,
   Copy,
+  Download,
   Eye,
   EyeOff,
   Flame,
   Gift,
-  Heart,
   History,
   ImagePlus,
   KeyRound,
@@ -39,6 +39,7 @@ import {
   X
 } from "lucide-react";
 import {
+  type ChangeEvent,
   type FormEvent,
   type ReactNode,
   useCallback,
@@ -48,6 +49,8 @@ import {
   useState
 } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { SUPPORTED_TIMEZONES, TIMEZONE_OPTIONS } from "../shared/constants";
+import { presentRewardSnapshot } from "../shared/rewards";
 import { api, ApiError, idempotencyKey } from "./api";
 
 type Bootstrap = {
@@ -56,6 +59,11 @@ type Bootstrap = {
   timezone: string;
   user_label: string;
   ai_label: string;
+};
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
 type Overview = {
@@ -124,6 +132,13 @@ const statusLabel = {
   cancelled: "已取消"
 };
 
+const supportedTimezoneValues = new Set<string>(SUPPORTED_TIMEZONES);
+
+function defaultTimezone() {
+  const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return supportedTimezoneValues.has(detected) ? detected : "Asia/Shanghai";
+}
+
 function formatDate(value?: string | null, withTime = false) {
   if (!value) return "没有期限";
   return new Intl.DateTimeFormat("zh-CN", {
@@ -169,7 +184,7 @@ function AuthBackdrop({ children, eyebrow, title, copy }: { children: ReactNode;
           <h1>{title}</h1>
           <p>{copy}</p>
         </div>
-        <blockquote>“把每一次回应，留成只属于你们的微光。”</blockquote>
+        <blockquote>“有些约定不必被看见，只需要被彼此记得。”</blockquote>
       </section>
       <section className="auth-panel">{children}</section>
     </main>
@@ -191,7 +206,7 @@ function SetupPage({
     setup_token: "",
     password: "",
     passwordConfirm: "",
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai",
+    timezone: defaultTimezone(),
     user_label: "你",
     ai_label: "AI"
   });
@@ -247,12 +262,12 @@ function SetupPage({
 
   if (step === 3 && tokenResult) {
     return (
-      <AuthBackdrop eyebrow="准备完成" title="现在，光已经亮了。" copy="这是 AI 连接 Phosphene 的唯一凭证。它只展示这一次。">
+      <AuthBackdrop eyebrow="准备完成" title="现在，信号已经亮了。" copy={`这是 ${form.ai_label} 连接 Phosphene 的唯一凭证。它只展示这一次。`}>
         <div className="auth-form">
           <div className="success-orbit">
             <Check />
           </div>
-          <p className="step-label">最后一步 · 保存 AI Token</p>
+          <p className="step-label">最后一步 · 保存连接 Token</p>
           <h2>收好这把钥匙</h2>
           <p className="muted">复制并保存在密码管理器中。之后如果遗失，只能在设置中轮换。</p>
           <SecretBox value={tokenResult.ai_token} />
@@ -278,7 +293,7 @@ function SetupPage({
   return (
     <AuthBackdrop
       eyebrow="PRIVATE BY DESIGN"
-      title="两个人的节奏，不需要第三个人看见。"
+      title="把你们之间的节奏，留在自己的空间里。"
       copy="Phosphene 将任务、承诺、积分和奖励留在你自己的服务器上。没有公开注册，也没有多余的旁观者。"
     >
       <form className="auth-form" onSubmit={submit}>
@@ -302,7 +317,7 @@ function SetupPage({
             ? setupProtected
               ? "这个实例启用了 Setup Token 保护，验证后才能设置唯一的登录密码。"
               : "这是一个尚未认领的新实例。设置密码并完成初始化后，首次设置入口会永久关闭。"
-            : "这些称呼只影响页面展示，内部权限始终保持 AI / user。"}
+            : "这些称呼只影响页面展示，不会改变连接权限与数据边界。"}
         </p>
         {error && <InlineError message={error} />}
         {step === 1 ? (
@@ -360,7 +375,7 @@ function SetupPage({
                   onChange={(event) => setForm({ ...form, user_label: event.target.value })}
                 />
               </Field>
-              <Field label="AI 的称呼">
+              <Field label="陪伴者的称呼">
                 <input
                   required
                   value={form.ai_label}
@@ -369,8 +384,7 @@ function SetupPage({
               </Field>
             </div>
             <Field label="时区" hint="积分与连击按这个自然日计算">
-              <input
-                required
+              <TimezoneSelect
                 value={form.timezone}
                 onChange={(event) => setForm({ ...form, timezone: event.target.value })}
               />
@@ -412,7 +426,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
     }
   }
   return (
-    <AuthBackdrop eyebrow="WELCOME BACK" title="回来就好。" copy="待完成的约定、累积的分数，还有那条没有断掉的连击，都在原处等你。">
+    <AuthBackdrop eyebrow="WELCOME BACK" title="你回来了，信号还在。" copy="待完成的约定、累积的分数，还有那条仍在延伸的轨迹，都留在原处等你。">
       <form className="auth-form" onSubmit={submit}>
         <p className="step-label">私人入口</p>
         <h2>进入 Phosphene</h2>
@@ -444,7 +458,21 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   );
 }
 
-function AppShell({ onLogout }: { onLogout: () => void }) {
+function AppShell({
+  bootstrap,
+  installPrompt,
+  installed,
+  onInstall,
+  onIdentityChanged,
+  onLogout
+}: {
+  bootstrap: Bootstrap;
+  installPrompt: InstallPromptEvent | null;
+  installed: boolean;
+  onInstall: () => Promise<void>;
+  onIdentityChanged: (settings: Pick<Bootstrap, "timezone" | "user_label" | "ai_label">) => void;
+  onLogout: () => void;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   useEffect(() => setMobileOpen(false), [location.pathname]);
@@ -482,6 +510,12 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           ))}
         </nav>
         <div className="sidebar__footer">
+          <div className="pair-signal" aria-label={`${bootstrap.user_label} 与 ${bootstrap.ai_label} 的私人空间`}>
+            <span>{bootstrap.user_label.slice(0, 1)}</span>
+            <i />
+            <span>{bootstrap.ai_label.slice(0, 1)}</span>
+            <small>一份部署 · 两个称呼 · 没有旁观者</small>
+          </div>
           <div className="privacy-chip">
             <ShieldCheck size={17} />
             <div>
@@ -503,12 +537,22 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           <div className="mini-orbit" />
         </header>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/tasks" element={<TasksPage />} />
-          <Route path="/rewards" element={<RewardsPage />} />
+          <Route path="/" element={<Dashboard aiLabel={bootstrap.ai_label} />} />
+          <Route path="/tasks" element={<TasksPage aiLabel={bootstrap.ai_label} />} />
+          <Route path="/rewards" element={<RewardsPage aiLabel={bootstrap.ai_label} />} />
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/history" element={<HistoryPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route
+            path="/settings"
+            element={
+              <SettingsPage
+                installAvailable={Boolean(installPrompt)}
+                installed={installed}
+                onInstall={onInstall}
+                onIdentityChanged={onIdentityChanged}
+              />
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -569,7 +613,7 @@ function useLoad<T>(loader: () => Promise<T>, dependencies: unknown[] = []) {
   return { data, error, loading, refresh };
 }
 
-function Dashboard() {
+function Dashboard({ aiLabel }: { aiLabel: string }) {
   const { data, error, loading, refresh } = useLoad<Overview>(() => api("/overview"), []);
   const tasks = useLoad<{ items: Task[] }>(() => api("/tasks?status=pending&limit=6"), []);
   if (loading && !data) return <PageLoader />;
@@ -630,16 +674,16 @@ function Dashboard() {
           <SectionHeading title="此刻要做的事" copy={`${data.queues.pending_tasks} 件待完成 · ${data.queues.awaiting_review} 件等待确认`} to="/tasks" />
           <div className="task-stack">
             {tasks.data?.items.length ? (
-              tasks.data.items.map((task) => <TaskCard key={task.id} task={task} onChanged={() => void Promise.all([refresh(), tasks.refresh()])} />)
+              tasks.data.items.map((task) => <TaskCard key={task.id} task={task} aiLabel={data.labels.ai || aiLabel} onChanged={() => void Promise.all([refresh(), tasks.refresh()])} />)
             ) : (
-              <EmptyState icon={<MoonStar />} title="现在没有待完成的任务" copy="享受这段留白，或者等 AI 留下一份新的约定。" />
+              <EmptyState icon={<MoonStar />} title="现在没有待完成的任务" copy={`享受这段留白，或者等 ${data.labels.ai || aiLabel} 留下一份新的约定。`} />
             )}
           </div>
         </div>
         <aside className="content-aside">
           <div className="queue-card">
             <SectionHeading title="等待回应" />
-            <QueueItem icon={<TimerReset />} label="等待 AI 确认" value={data.queues.awaiting_review} tone="amber" />
+            <QueueItem icon={<TimerReset />} label={`等待 ${data.labels.ai || aiLabel} 确认`} value={data.queues.awaiting_review} tone="amber" />
             <QueueItem icon={<TicketCheck />} label="等待奖励履行" value={data.queues.pending_redemptions} tone="violet" />
           </div>
           <div className="achievement-peek">
@@ -683,7 +727,7 @@ function QueueItem({ icon, label, value, tone }: { icon: ReactNode; label: strin
   );
 }
 
-function TaskCard({ task, onChanged }: { task: Task; onChanged?: () => void }) {
+function TaskCard({ task, aiLabel, onChanged }: { task: Task; aiLabel: string; onChanged?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -706,7 +750,7 @@ function TaskCard({ task, onChanged }: { task: Task; onChanged?: () => void }) {
         </div>
         <ChevronRight className="task-card__chevron" />
       </article>
-      {open && <TaskDialog taskId={task.id} initialTask={task} onClose={() => setOpen(false)} onChanged={onChanged} />}
+      {open && <TaskDialog taskId={task.id} initialTask={task} aiLabel={aiLabel} onClose={() => setOpen(false)} onChanged={onChanged} />}
     </>
   );
 }
@@ -714,11 +758,13 @@ function TaskCard({ task, onChanged }: { task: Task; onChanged?: () => void }) {
 function TaskDialog({
   taskId,
   initialTask,
+  aiLabel,
   onClose,
   onChanged
 }: {
   taskId: string;
   initialTask: Task;
+  aiLabel: string;
   onClose: () => void;
   onChanged?: () => void;
 }) {
@@ -767,7 +813,7 @@ function TaskDialog({
         <div className="detail-strip">
           <div><Coins /><span>完成奖励</span><strong>+{pointsFor(task)}</strong></div>
           <div><Clock3 /><span>截止时间</span><strong>{formatDate(task.deadlineAt, true)}</strong></div>
-          <div><ShieldCheck /><span>确认方式</span><strong>{task.verificationMode === "self" ? "自己确认" : "AI 确认"}</strong></div>
+          <div><ShieldCheck /><span>确认方式</span><strong>{task.verificationMode === "self" ? "自己确认" : `${aiLabel} 确认`}</strong></div>
         </div>
         {task.status === "pending" && (
           <div className="submission-box">
@@ -804,7 +850,7 @@ function TaskDialog({
               </>
             )}
             <button className="button button--primary button--wide" disabled={busy} onClick={submit}>
-              {busy ? "正在提交…" : task.verificationMode === "self" ? "确认完成" : "提交给 AI 确认"} <Check size={17} />
+              {busy ? "正在提交…" : task.verificationMode === "self" ? "确认完成" : `提交给 ${aiLabel} 确认`} <Check size={17} />
             </button>
           </div>
         )}
@@ -840,7 +886,7 @@ function proofLabel(value: string) {
   }[value] ?? value;
 }
 
-function TasksPage() {
+function TasksPage({ aiLabel }: { aiLabel: string }) {
   const [status, setStatus] = useState("active");
   const [type, setType] = useState("all");
   const query = useMemo(() => {
@@ -874,20 +920,21 @@ function TasksPage() {
         </select>
       </div>
       {loading ? <PageLoader compact /> : error ? <PageError message={error} retry={refresh} /> : items.length ? (
-        <div className="task-grid">{items.map((task) => <TaskCard key={task.id} task={task} onChanged={refresh} />)}</div>
+        <div className="task-grid">{items.map((task) => <TaskCard key={task.id} task={task} aiLabel={aiLabel} onChanged={refresh} />)}</div>
       ) : (
-        <EmptyState icon={<ListTodo />} title="这个分类里还没有任务" copy="换一个筛选条件看看，或者等待 AI 创建新的安排。" />
+        <EmptyState icon={<ListTodo />} title="这个分类里还没有任务" copy={`换一个筛选条件看看，或者等待 ${aiLabel} 创建新的安排。`} />
       )}
     </div>
   );
 }
 
-function RewardsPage() {
+function RewardsPage({ aiLabel }: { aiLabel: string }) {
   const overview = useLoad<Overview>(() => api("/overview"), []);
   const rewards = useLoad<any[]>(() => api("/rewards"), []);
   const redemptions = useLoad<any[]>(() => api("/redemptions"), []);
   const [redeeming, setRedeeming] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const visibleAiLabel = overview.data?.labels.ai || aiLabel;
   async function redeem(item: any) {
     if (!confirm(`使用 ${item.cost} 积分兑换“${item.name}”？`)) return;
     setRedeeming(item.id);
@@ -896,7 +943,7 @@ function RewardsPage() {
         method: "POST",
         body: { idempotency_key: idempotencyKey("redeem") }
       });
-      setNotice(`“${item.name}”已经放进愿望清单，等待 AI 履行。`);
+      setNotice(`兑换成功，${item.cost} 积分已扣除。现在等待 ${visibleAiLabel} 履行“${item.name}”。`);
       await Promise.all([overview.refresh(), redemptions.refresh()]);
     } catch (reason) {
       setNotice(reason instanceof Error ? reason.message : "兑换失败。");
@@ -913,12 +960,12 @@ function RewardsPage() {
         action={<div className="header-balance"><Coins /><span>可用</span><strong>{overview.data?.statistics.balance ?? "—"}</strong></div>}
       />
       {notice && <div className="notice-banner"><Sparkles />{notice}<button onClick={() => setNotice("")}><X /></button></div>}
-      {rewards.loading ? <PageLoader compact /> : (
+      {rewards.loading ? <PageLoader compact /> : rewards.data?.length ? (
         <section className="reward-grid">
           {rewards.data?.map((item, index) => (
             <article className="reward-card" key={item.id}>
               <div className={`reward-illustration reward-illustration--${index % 4}`}>
-                {index % 4 === 0 ? <Sparkles /> : index % 4 === 1 ? <MoonStar /> : index % 4 === 2 ? <Heart /> : <Gift />}
+                {index % 4 === 0 ? <Sparkles /> : index % 4 === 1 ? <MoonStar /> : index % 4 === 2 ? <Star /> : <Gift />}
                 <span />
               </div>
               <div className="reward-card__body">
@@ -939,6 +986,12 @@ function RewardsPage() {
             </article>
           ))}
         </section>
+      ) : (
+        <EmptyState
+          icon={<Gift />}
+          title="兑换清单还没有内容"
+          copy={`${visibleAiLabel} 可以通过 Phosphene 连接创建只属于你们的奖励。`}
+        />
       )}
       <section className="section-block">
         <SectionHeading title="兑换记录" copy="许下的愿望与已经兑现的回应" />
@@ -946,7 +999,7 @@ function RewardsPage() {
           {redemptions.data?.length ? redemptions.data.map((item) => (
             <div className="redemption-row" key={item.id}>
               <span className={`redemption-status redemption-status--${item.status}`}>{item.status === "pending" ? <Clock3 /> : <Check />}</span>
-              <div><strong>{item.itemNameSnapshot}</strong><span>{formatDate(item.redeemedAt, true)}</span></div>
+              <div><strong>{presentRewardSnapshot(item.itemNameSnapshot, visibleAiLabel)}</strong><span>{formatDate(item.redeemedAt, true)}</span></div>
               <span>-{item.costSnapshot}</span>
               <em>{item.status === "fulfilled" ? "已履行" : item.status === "cancelled" ? "已取消" : "等待履行"}</em>
             </div>
@@ -1118,7 +1171,17 @@ function ledgerLabel(type: string) {
   }[type] ?? type;
 }
 
-function SettingsPage() {
+function SettingsPage({
+  installAvailable,
+  installed,
+  onInstall,
+  onIdentityChanged
+}: {
+  installAvailable: boolean;
+  installed: boolean;
+  onInstall: () => Promise<void>;
+  onIdentityChanged: (settings: Pick<Bootstrap, "timezone" | "user_label" | "ai_label">) => void;
+}) {
   const [tab, setTab] = useState("identity");
   const settings = useLoad<any>(() => api("/settings"), []);
   const tokens = useLoad<any[]>(() => api("/ai-tokens"), []);
@@ -1142,10 +1205,24 @@ function SettingsPage() {
         <section className="settings-panel">
           {settings.loading ? <PageLoader compact /> : !settings.data ? <PageError message={settings.error} retry={settings.refresh} /> : (
             <>
-              {tab === "identity" && <IdentitySettings value={settings.data} onSaved={settings.refresh} />}
+              {tab === "identity" && (
+                <IdentitySettings
+                  value={settings.data}
+                  onSaved={(updated) => {
+                    onIdentityChanged(updated);
+                    void settings.refresh();
+                  }}
+                />
+              )}
               {tab === "boundaries" && <BoundarySettings value={settings.data} onSaved={settings.refresh} />}
               {tab === "connection" && <ConnectionSettings tokens={tokens.data ?? []} onChanged={tokens.refresh} />}
-              {tab === "data" && <DataSettings />}
+              {tab === "data" && (
+                <DataSettings
+                  installAvailable={installAvailable}
+                  installed={installed}
+                  onInstall={onInstall}
+                />
+              )}
               {tab === "security" && <SecuritySettings />}
             </>
           )}
@@ -1155,21 +1232,30 @@ function SettingsPage() {
   );
 }
 
-function IdentitySettings({ value, onSaved }: { value: any; onSaved: () => void }) {
+function IdentitySettings({
+  value,
+  onSaved
+}: {
+  value: any;
+  onSaved: (settings: Pick<Bootstrap, "timezone" | "user_label" | "ai_label">) => void;
+}) {
   const [form, setForm] = useState(value);
   return (
     <SettingsForm
       title="称呼与时间"
       copy="显示称呼不改变内部权限。自然日、连击与每日扣分限额都按这里的时区结算。"
       form={form}
-      onSave={async () => { await api("/settings", { method: "PUT", body: form }); onSaved(); }}
+      onSave={async () => {
+        const updated = await api<any>("/settings", { method: "PUT", body: form });
+        onSaved(updated);
+      }}
     >
       <div className="field-grid">
         <Field label="你的称呼"><input value={form.user_label} onChange={(e) => setForm({ ...form, user_label: e.target.value })} /></Field>
         <Field label="AI 的称呼"><input value={form.ai_label} onChange={(e) => setForm({ ...form, ai_label: e.target.value })} /></Field>
       </div>
-      <Field label="时区" hint="使用 IANA 时区，例如 Asia/Shanghai">
-        <input value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
+      <Field label="时区" hint="连击、截止时间和每日限额都按这里的自然日结算">
+        <TimezoneSelect value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
       </Field>
     </SettingsForm>
   );
@@ -1259,7 +1345,15 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
   );
 }
 
-function DataSettings() {
+function DataSettings({
+  installAvailable,
+  installed,
+  onInstall
+}: {
+  installAvailable: boolean;
+  installed: boolean;
+  onInstall: () => Promise<void>;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1288,6 +1382,25 @@ function DataSettings() {
   return (
     <div className="settings-form">
       <div className="settings-title"><div><h2>数据与备份</h2><p>导出包含数据库记录和经过净化的私有图片。恢复操作需要再次验证密码。</p></div></div>
+      <div className="install-card">
+        <div className="install-card__icon"><Download /></div>
+        <div>
+          <strong>{installed ? "Phosphene 已在桌面" : "把 Phosphene 留在桌面"}</strong>
+          <span>
+            {installed
+              ? "现在可以像独立应用一样打开，并使用完整的移动端安全区。"
+              : installAvailable
+                ? "安装后会以独立窗口打开，不需要应用商店。"
+                : "在浏览器分享或菜单中选择“添加到主屏幕”即可安装。"}
+          </span>
+        </div>
+        {installAvailable && !installed && (
+          <button className="button button--secondary" type="button" onClick={() => void onInstall()}>
+            安装应用
+          </button>
+        )}
+        {installed && <span className="install-card__status"><Check /> 已安装</span>}
+      </div>
       <div className="data-action">
         <div><Upload /><div><strong>导出完整备份</strong><span>下载一个可恢复的 .zip 文件</span></div></div>
         <a className="button button--secondary" href="/api/backup/export" download>开始导出</a>
@@ -1356,6 +1469,24 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <label className="field"><span><strong>{label}</strong>{hint && <small>{hint}</small>}</span>{children}</label>;
 }
 
+function TimezoneSelect({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+}) {
+  const legacyValue = !supportedTimezoneValues.has(value);
+  return (
+    <select required value={value} onChange={onChange}>
+      {legacyValue && <option value={value}>当前旧时区 · {value}</option>}
+      {TIMEZONE_OPTIONS.map((option) => (
+        <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+    </select>
+  );
+}
+
 function InlineError({ message }: { message: string }) {
   return <div className="inline-error">{message}</div>;
 }
@@ -1375,6 +1506,26 @@ function EmptyState({ icon, title, copy, compact = false }: { icon: ReactNode; t
 export default function App() {
   const [state, setState] = useState<"loading" | "setup" | "login" | "ready">("loading");
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installed, setInstalled] = useState(
+    () => window.matchMedia?.("(display-mode: standalone)").matches ?? false
+  );
+  useEffect(() => {
+    const capturePrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const markInstalled = () => {
+      setInstalled(true);
+      setInstallPrompt(null);
+    };
+    window.addEventListener("beforeinstallprompt", capturePrompt);
+    window.addEventListener("appinstalled", markInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", capturePrompt);
+      window.removeEventListener("appinstalled", markInstalled);
+    };
+  }, []);
   useEffect(() => {
     void (async () => {
       try {
@@ -1398,6 +1549,13 @@ export default function App() {
   async function doLogout() {
     try { await api("/logout", { method: "POST" }); } finally { setState("login"); }
   }
+  async function installApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") setInstalled(true);
+    setInstallPrompt(null);
+  }
   if (state === "loading") return <FullPageLoader />;
   if (state === "setup") {
     return (
@@ -1411,5 +1569,21 @@ export default function App() {
     );
   }
   if (state === "login") return <LoginPage onLogin={() => setState("ready")} />;
-  return <AppShell onLogout={doLogout} />;
+  const readyBootstrap = bootstrap ?? {
+    initialized: true,
+    setup_protected: false,
+    timezone: "Asia/Shanghai",
+    user_label: "你",
+    ai_label: "AI"
+  };
+  return (
+    <AppShell
+      bootstrap={readyBootstrap}
+      installPrompt={installPrompt}
+      installed={installed}
+      onInstall={installApp}
+      onIdentityChanged={(settings) => setBootstrap((current) => ({ ...(current ?? readyBootstrap), ...settings }))}
+      onLogout={doLogout}
+    />
+  );
 }

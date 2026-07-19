@@ -10,6 +10,7 @@
   "packageManager": "pnpm@10.13.1",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx watch src/server/index.ts",
+    "assets:pwa": "node scripts/generate-pwa-icons.mjs",
     "build:web": "vite build",
     "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist/server --packages=external",
     "build": "pnpm build:web && pnpm build:server",

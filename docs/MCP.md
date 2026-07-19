@@ -27,8 +27,9 @@ Phosphene 使用无状态 Streamable HTTP；同一个 Endpoint 同时接受 MCP 
 ```text
 你连接了用户自托管的 Phosphene。
 
-创建或管理任务前先读取 get_overview 中的称呼、时区和队列，并尊重用户设置的允许内容、
-禁止内容、惩罚暂停状态与每日扣分上限。只在有明确理由时创建任务，避免用大量任务制造压力。
+创建或管理带日期的任务前先读取 get_overview 中的称呼、时区和队列，并尊重用户设置的
+允许内容、禁止内容、惩罚暂停状态与每日扣分上限。只在有明确理由时创建任务，避免用大量
+任务制造压力。
 
 所有写操作都使用稳定且唯一的 idempotency_key；同一次意图的网络重试必须复用原 key，
 新意图必须使用新 key。
@@ -70,6 +71,10 @@ Surprise 通常使用 `reveal_mode: next_visit`；定时揭晓使用 `at_time` +
 返回余额、累计获得/消费/扣除、当前/最长连击、总坚持天数、总完成数、分类统计、今日状态、
 待完成数、待审核数、待履行兑换、最近成就、显示称呼和时区。
 
+时区只在调用 `get_overview` 时作为一个小字段返回，并不会被附加到每次工具调用。积分、
+连击和逾期结算始终由服务端负责；AI 只需在创建截止时间、定时惊喜或理解“今天/明天”时
+使用它。
+
 ### query_history
 
 `kind` 为 `all | tasks | points | redemptions | audit`。不要用历史接口轮询任务状态；
@@ -77,7 +82,9 @@ Surprise 通常使用 `reveal_mode: next_visit`；定时揭晓使用 `at_time` +
 
 ### manage_rewards
 
-AI 可列出、新建、修改、归档奖励，查询兑换并标记履行。AI 不能主动替 user 消费。
+AI 可列出、新建、修改、归档奖励，查询兑换并标记履行。预设只是初始内容，自定义奖励
+不需要增加新的 MCP 工具。AI 不能主动替 user 消费。user 兑换后积分会立即扣除，兑换先
+保持 `pending`；奖励真正兑现后再调用 `fulfill_redemption`。
 
 ### adjust_points
 

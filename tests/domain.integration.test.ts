@@ -13,6 +13,7 @@ import {
   adjustPoints,
   getOverview,
   listAchievements,
+  manageRewards,
   manageTask,
   queryTasks,
   reconcileSystem,
@@ -113,12 +114,61 @@ describe.sequential("Phosphene domain integration", () => {
     expect(bonuses.some((entry: any) => entry.effectiveDate === today && entry.amount === 1)).toBe(true);
   });
 
-  it("redeems atomically and does not spend twice on retry", async () => {
-    const first = await redeemReward("reward_song", "integration-redeem-song");
-    const retry = await redeemReward("reward_song", "integration-redeem-song");
+  it("presents the two universal presets with the chosen label and retires old defaults", async () => {
+    await getDb().update(appSettings).set({ aiLabel: "星沉" }).where(eq(appSettings.id, 1));
+    const rewards = await manageRewards({ action: "list", include_archived: false }) as any[];
+    expect(rewards.map((reward: any) => reward.id)).toEqual(["reward_writing", "reward_listen"]);
+    expect(rewards.find((reward: any) => reward.id === "reward_writing")?.name).toBe("指定 星沉 写东西");
+    expect(rewards.find((reward: any) => reward.id === "reward_listen")?.name).toBe("“星沉 听你的”券");
+  });
+
+  it("deducts points atomically, keeps redemption pending until fulfillment, and does not spend twice on retry", async () => {
+    await adjustPoints({
+      kind: "bonus",
+      amount: 10,
+      reason: "Integration redemption balance",
+      idempotency_key: "integration-redeem-balance"
+    });
+    const first = await redeemReward("reward_writing", "integration-redeem-writing");
+    const retry = await redeemReward("reward_writing", "integration-redeem-writing");
     expect(retry.redemption.id).toBe(first.redemption.id);
     expect(retry.balance).toBe(first.balance);
+    expect(first.redemption.status).toBe("pending");
+    expect(first.redemption.itemNameSnapshot).toBe("指定 星沉 写东西");
     expect((await getOverview()).statistics.balance).toBe(5);
+    await manageRewards({
+      action: "fulfill_redemption",
+      redemption_id: first.redemption.id,
+      note: "Delivered in integration test",
+      idempotency_key: "integration-fulfill-writing"
+    });
+    const rows = await manageRewards({ action: "list_redemptions", status: "fulfilled" }) as any[];
+    expect(rows.find((row: any) => row.id === first.redemption.id)?.status).toBe("fulfilled");
+  });
+
+  it("lets the AI create, edit, and archive a custom reward through one MCP tool", async () => {
+    const created = await manageRewards({
+      action: "create",
+      name: "一起看一部电影",
+      description: "今晚共同挑选一部电影。",
+      cost: 12,
+      idempotency_key: "integration-create-custom-reward"
+    });
+    const rewardId = (created as any).reward.id;
+    const updated = await manageRewards({
+      action: "update",
+      reward_id: rewardId,
+      cost: 18,
+      idempotency_key: "integration-update-custom-reward"
+    });
+    expect((updated as any).reward.cost).toBe(18);
+    await manageRewards({
+      action: "archive",
+      reward_id: rewardId,
+      idempotency_key: "integration-archive-custom-reward"
+    });
+    const active = await manageRewards({ action: "list", include_archived: false }) as any[];
+    expect(active.some((reward: any) => reward.id === rewardId)).toBe(false);
   });
 
   it("caps a failed-task penalty at the available balance and is idempotent", async () => {

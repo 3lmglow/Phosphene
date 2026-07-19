@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/client";
+import { seedDatabase } from "../db/seed";
 import {
   achievementUnlocks,
   appSettings,
@@ -173,5 +174,8 @@ export async function restoreBackup(buffer: Buffer): Promise<void> {
     throw error;
   }
   await removeStoredProofs(oldProofs);
+  // Reapply current built-in definitions and retire superseded defaults after
+  // importing an archive created by an older Phosphene release.
+  await seedDatabase();
   await reconcileSystem();
 }

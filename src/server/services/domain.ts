@@ -14,6 +14,11 @@ import {
   sql
 } from "drizzle-orm";
 import { DIFFICULTY_MULTIPLIER, streakBonusForDay } from "../../shared/constants";
+import {
+  presentLedgerReason,
+  presentRewardItem,
+  presentRewardSnapshot
+} from "../../shared/rewards";
 import type {
   AdjustPointsInput,
   CreateTaskInput,
@@ -55,6 +60,14 @@ import type { StoredProof } from "./storage";
 
 type Db = any;
 type Actor = "AI" | "user" | "system";
+
+function presentRedemption(row: any, aiLabel: string) {
+  return {
+    ...row,
+    itemNameSnapshot: presentRewardSnapshot(row.itemNameSnapshot, aiLabel),
+    rewardItem: row.rewardItem ? presentRewardItem(row.rewardItem, aiLabel) : row.rewardItem
+  };
+}
 
 async function getSettings(tx: Db) {
   return assertFound(
@@ -802,6 +815,7 @@ export async function queryHistory(input: {
 }) {
   await reconcileSystem();
   const db = getDb();
+  const settings = await getSettings(db);
   const limit = Math.min(input.limit ?? 30, 100);
   const kind = input.kind ?? "all";
   const result: Record<string, unknown> = {};
@@ -813,14 +827,19 @@ export async function queryHistory(input: {
     });
   }
   if (kind === "all" || kind === "points") {
-    result.points = await db.query.pointLedger.findMany({ orderBy: [desc(pointLedger.createdAt)], limit });
+    const rows = await db.query.pointLedger.findMany({ orderBy: [desc(pointLedger.createdAt)], limit });
+    result.points = rows.map((row: any) => ({
+      ...row,
+      reason: presentLedgerReason(row.reason, settings.aiLabel)
+    }));
   }
   if (kind === "all" || kind === "redemptions") {
-    result.redemptions = await db.query.redemptions.findMany({
+    const rows = await db.query.redemptions.findMany({
       orderBy: [desc(redemptions.redeemedAt)],
       limit,
       with: { rewardItem: true }
     });
+    result.redemptions = rows.map((row: any) => presentRedemption(row, settings.aiLabel));
   }
   if (kind === "all" || kind === "audit") {
     result.audit = await db.query.auditLogs.findMany({ orderBy: [desc(auditLogs.createdAt)], limit });
@@ -831,17 +850,21 @@ export async function queryHistory(input: {
 export async function manageRewards(input: RewardManageInput, actor: Actor = "AI") {
   const db = getDb();
   if (input.action === "list") {
-    return db.query.rewardItems.findMany({
+    const settings = await getSettings(db);
+    const rows = await db.query.rewardItems.findMany({
       where: input.include_archived ? undefined : eq(rewardItems.active, true),
       orderBy: [asc(rewardItems.sortOrder), asc(rewardItems.createdAt)]
     });
+    return rows.map((row: any) => presentRewardItem(row, settings.aiLabel));
   }
   if (input.action === "list_redemptions") {
-    return db.query.redemptions.findMany({
+    const settings = await getSettings(db);
+    const rows = await db.query.redemptions.findMany({
       where: input.status ? eq(redemptions.status, input.status) : undefined,
       orderBy: [desc(redemptions.redeemedAt)],
       with: { rewardItem: true }
     });
+    return rows.map((row: any) => presentRedemption(row, settings.aiLabel));
   }
 
   return db.transaction(async (tx: Db) =>
@@ -901,10 +924,12 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
 export async function redeemReward(rewardId: string, idempotencyKey: string) {
   return getDb().transaction(async (tx: Db) =>
     idempotent(tx, "redeem_reward", idempotencyKey, async () => {
+      const settings = await getSettings(tx);
       const reward = assertFound(
         await tx.query.rewardItems.findFirst({ where: and(eq(rewardItems.id, rewardId), eq(rewardItems.active, true)) }),
         "Reward not found"
       );
+      const presentedReward = presentRewardItem(reward, settings.aiLabel);
       const balance = await currentBalance(tx);
       assertState(balance >= reward.cost, "insufficient_points", "Not enough points for this reward");
       const id = createId("redemption");
@@ -913,7 +938,7 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
         .values({
           id,
           rewardItemId: reward.id,
-          itemNameSnapshot: reward.name,
+          itemNameSnapshot: presentedReward.name,
           costSnapshot: reward.cost,
           idempotencyKey
         })
@@ -922,10 +947,10 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
         type: "redemption",
         amount: -reward.cost,
         key: `redemption:${id}`,
-        reason: `Redeemed: ${reward.name}`,
+        reason: `Redeemed: ${presentedReward.name}`,
         redemptionId: id
       });
-      await audit(tx, "user", "reward.redeemed", "redemption", id, `Redeemed “${reward.name}”`, { cost: reward.cost });
+      await audit(tx, "user", "reward.redeemed", "redemption", id, `Redeemed “${presentedReward.name}”`, { cost: reward.cost });
       await recomputeActivityAndStats(tx);
       return { redemption, balance: balance - reward.cost };
     })

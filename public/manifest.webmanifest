@@ -1,0 +1,52 @@
+{
+  "id": "/",
+  "name": "Phosphene · 私人信号",
+  "short_name": "Phosphene",
+  "description": "属于你和数字伴侣的私人任务、积分与回应空间。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f4f2f8",
+  "theme_color": "#17152b",
+  "categories": ["lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/phosphene-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/phosphene-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/phosphene-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日",
+      "short_name": "今日",
+      "url": "/"
+    },
+    {
+      "name": "任务",
+      "short_name": "任务",
+      "url": "/tasks"
+    },
+    {
+      "name": "兑换",
+      "short_name": "兑换",
+      "url": "/rewards"
+    }
+  ]
+}

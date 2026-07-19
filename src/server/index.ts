@@ -87,8 +87,20 @@ if (config.NODE_ENV === "development") {
   app.use(vite.middlewares);
 } else {
   const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web");
-  app.use(express.static(webRoot, { index: false, maxAge: "1y", immutable: true }));
+  app.use(
+    express.static(webRoot, {
+      index: false,
+      maxAge: "1y",
+      immutable: true,
+      setHeaders(response, filePath) {
+        if (["sw.js", "manifest.webmanifest"].includes(path.basename(filePath))) {
+          response.setHeader("Cache-Control", "no-cache");
+        }
+      }
+    })
+  );
   app.use((_request, response) => {
+    response.set("Cache-Control", "no-cache");
     response.sendFile(path.join(webRoot, "index.html"));
   });
 }

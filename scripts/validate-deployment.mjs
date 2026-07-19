@@ -13,6 +13,9 @@ const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const configSource = fs.readFileSync("src/server/config.ts", "utf8");
 const databaseSource = fs.readFileSync("src/server/db/client.ts", "utf8");
 const storageSource = fs.readFileSync("src/server/services/storage.ts", "utf8");
+const serverSource = fs.readFileSync("src/server/index.ts", "utf8");
+const manifest = JSON.parse(fs.readFileSync("public/manifest.webmanifest", "utf8"));
+const serviceWorker = fs.readFileSync("public/sw.js", "utf8");
 
 assert(dockerfile.includes('VOLUME ["/data"]'), "Image must declare the /data volume");
 assert(dockerfile.includes("docker-entrypoint.sh"), "Image must install its entrypoint");
@@ -40,6 +43,18 @@ assert(databaseSource.includes('PRAGMA journal_mode = WAL'), "SQLite WAL mode is
 assert(databaseSource.includes('PRAGMA foreign_keys = ON'), "SQLite foreign keys are not enabled");
 assert(!/@electric-sql|node-postgres/.test(databaseSource), "Legacy database driver remains");
 assert(!/@aws-sdk|S3Client/.test(storageSource), "Legacy object storage driver remains");
+assert(manifest.display === "standalone", "PWA must open in standalone mode");
+assert(manifest.icons.some((icon) => icon.sizes === "512x512"), "PWA 512px icon is missing");
+assert(
+  serviceWorker.includes('url.pathname.startsWith("/api/")') &&
+    serviceWorker.includes('url.pathname === "/mcp"'),
+  "Service worker must not cache private API or MCP traffic"
+);
+assert(
+  serverSource.includes('["sw.js", "manifest.webmanifest"]') &&
+    serverSource.includes('response.setHeader("Cache-Control", "no-cache")'),
+  "Service worker and manifest must remain revalidatable after deployment updates"
+);
 
 assert(zeabur.apiVersion === "zeabur.com/v1", "Unexpected Zeabur apiVersion");
 assert(zeabur.kind === "Template", "Zeabur resource must be a Template");

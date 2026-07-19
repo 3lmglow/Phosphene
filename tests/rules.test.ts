@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DIFFICULTY_MULTIPLIER, streakBonusForDay } from "../src/shared/constants";
+import {
+  DIFFICULTY_MULTIPLIER,
+  SUPPORTED_TIMEZONES,
+  TIMEZONE_OPTIONS,
+  streakBonusForDay
+} from "../src/shared/constants";
 import { addCalendarDays, localDate, localDateTime } from "../src/server/lib/dates";
 import { resolveDeployment } from "../src/server/lib/deployment";
 
@@ -22,6 +27,15 @@ describe("frozen scoring rules", () => {
 });
 
 describe("timezone-safe calendar helpers", () => {
+  it("offers a concise, valid set of common timezone choices", () => {
+    expect(TIMEZONE_OPTIONS).toHaveLength(9);
+    expect(SUPPORTED_TIMEZONES).toContain("Asia/Shanghai");
+    expect(SUPPORTED_TIMEZONES).toContain("America/New_York");
+    for (const timezone of SUPPORTED_TIMEZONES) {
+      expect(() => new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format()).not.toThrow();
+    }
+  });
+
   it("keeps local dates stable across UTC boundaries", () => {
     expect(localDate(new Date("2026-07-18T16:30:00.000Z"), "Asia/Shanghai")).toBe("2026-07-19");
     expect(localDate(new Date("2026-07-19T03:30:00.000Z"), "America/New_York")).toBe("2026-07-18");

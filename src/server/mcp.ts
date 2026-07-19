@@ -132,7 +132,7 @@ function createMcpServer() {
 
   server.tool(
     "get_overview",
-    "Get balance, streaks, lifetime statistics, today's state, queues, labels, timezone, and recent achievements.",
+    "Get balance, streaks, lifetime statistics, today's state, queues, labels, timezone, boundaries, and recent achievements. The server owns scoring; use timezone only when reasoning about local dates or creating timed tasks.",
     {},
     async () => result(await getOverview())
   );

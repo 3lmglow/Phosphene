@@ -1,13 +1,7 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { PRESET_REWARDS, RETIRED_PRESET_REWARDS } from "../../shared/rewards";
 import { getDb } from "./client";
 import { achievements, appSettings, rewardItems, statistics } from "./schema";
-
-const presetRewards = [
-  { id: "reward_clauro_5", name: "clauro 5 额度", description: "兑换 5 额度 clauro。", cost: 5, sortOrder: 10 },
-  { id: "reward_song", name: "点歌权", description: "指定一首想听的歌。", cost: 5, sortOrder: 20 },
-  { id: "reward_writing", name: "指定 AI 写东西", description: "给 AI 一个主题，由它专门为你写。", cost: 15, sortOrder: 30 },
-  { id: "reward_listen", name: "“AI 听你的”券", description: "在双方边界内，今天由你做一次主。", cost: 20, sortOrder: 40 }
-];
 
 const achievementDefinitions = [
   ["first_task", "第一束光", "完成第一个任务", "completed", 1, "sparkles"],
@@ -50,8 +44,24 @@ export async function seedDatabase(): Promise<void> {
 
   await db
     .insert(rewardItems)
-    .values(presetRewards)
+    .values(PRESET_REWARDS.map((reward) => ({ ...reward })))
     .onConflictDoNothing();
+
+  // Remove retired defaults from existing installations without touching a
+  // reward that its owner has already customized into something else.
+  for (const retired of RETIRED_PRESET_REWARDS) {
+    await db
+      .update(rewardItems)
+      .set({ active: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(rewardItems.id, retired.id),
+          eq(rewardItems.name, retired.name),
+          eq(rewardItems.description, retired.description),
+          eq(rewardItems.cost, retired.cost)
+        )
+      );
+  }
 
   await db
     .insert(achievements)
