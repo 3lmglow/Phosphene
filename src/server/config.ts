@@ -30,6 +30,10 @@ const configSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
   DATABASE_URL: optionalString,
   PGLITE_PATH: optionalString,
+  PGLITE_INITIAL_MEMORY_MB: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().min(128).max(512).default(128)
+  ),
   STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
   LOCAL_STORAGE_PATH: optionalString,
   S3_ENDPOINT: urlWithDefault("http://localhost:9000"),

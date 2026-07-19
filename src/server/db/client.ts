@@ -14,6 +14,11 @@ type Database = ReturnType<typeof drizzlePg<typeof schema>> | ReturnType<typeof 
 let database: Database | undefined;
 let closeDatabase: (() => Promise<void>) | undefined;
 
+export function collectRuntimeGarbage(): void {
+  const runtime = globalThis as typeof globalThis & { gc?: () => void };
+  runtime.gc?.();
+}
+
 export async function initializeDatabase(): Promise<Database> {
   if (database) return database;
 
@@ -31,9 +36,14 @@ export async function initializeDatabase(): Promise<Database> {
     closeDatabase = async () => pool.end();
   } else {
     await fs.mkdir(path.dirname(config.PGLITE_PATH), { recursive: true });
-    const client = new PGlite(config.PGLITE_PATH);
+    const client = await PGlite.create({
+      dataDir: config.PGLITE_PATH,
+      initialMemory: config.PGLITE_INITIAL_MEMORY_MB * 1024 * 1024
+    });
+    collectRuntimeGarbage();
     const db = drizzlePglite(client, { schema });
     await migratePglite(db, { migrationsFolder });
+    collectRuntimeGarbage();
     database = db;
     closeDatabase = async () => client.close();
   }

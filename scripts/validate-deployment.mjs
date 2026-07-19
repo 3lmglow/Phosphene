@@ -13,8 +13,19 @@ const entrypoint = fs.readFileSync("docker-entrypoint.sh", "utf8");
 
 assert(appDockerfile.includes('VOLUME ["/data"]'), "Single-service image must declare the /data volume");
 assert(appDockerfile.includes("docker-entrypoint.sh"), "Single-service image must install its entrypoint");
+assert(
+  appDockerfile.includes("--max-old-space-size=128") &&
+    appDockerfile.includes("--max-semi-space-size=4") &&
+    appDockerfile.includes("--expose-gc"),
+  "Single-service image must bound the Node heap and expose explicit startup garbage collection"
+);
 assert(entrypoint.includes('PHOSPHENE_DATA_DIR:-/data'), "Entrypoint must default to /data");
 assert(entrypoint.includes('exec gosu node "$@"'), "Entrypoint must drop privileges before starting");
+assert(
+  entrypoint.includes('if ! chown node:node "$data_dir"') &&
+    entrypoint.includes('gosu node test -w "$data_dir"'),
+  "Entrypoint must tolerate root-squashed volumes while verifying node write access"
+);
 
 assert(zeabur.apiVersion === "zeabur.com/v1", "Unexpected Zeabur apiVersion");
 assert(zeabur.kind === "Template", "Zeabur resource must be a Template");
