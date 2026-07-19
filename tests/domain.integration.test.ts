@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initializeDatabase, getDb, shutdownDatabase } from "../src/server/db/client";
@@ -25,6 +27,12 @@ describe.sequential("Phosphene domain integration", () => {
   let dailyTaskId = "";
 
   beforeAll(async () => {
+    const databasePath = path.resolve(".data/test.sqlite");
+    await Promise.all(
+      ["", "-shm", "-wal"].map((suffix) =>
+        fs.rm(`${databasePath}${suffix}`, { force: true })
+      )
+    );
     await initializeDatabase();
     await seedDatabase();
   });

@@ -14,8 +14,7 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     env: {
       NODE_ENV: "test",
-      PGLITE_PATH: "memory://",
-      STORAGE_DRIVER: "local",
+      SQLITE_PATH: ".data/test.sqlite",
       LOCAL_STORAGE_PATH: ".data/test-uploads"
     },
     sequence: {

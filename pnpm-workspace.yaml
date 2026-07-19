@@ -1,6 +1,8 @@
 packages:
   - "."
 
+autoInstallPeers: false
+
 allowBuilds:
   argon2: true
   esbuild: true

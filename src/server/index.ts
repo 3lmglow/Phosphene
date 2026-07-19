@@ -6,7 +6,7 @@ import helmet from "helmet";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { config } from "./config";
-import { collectRuntimeGarbage, initializeDatabase, shutdownDatabase } from "./db/client";
+import { initializeDatabase, shutdownDatabase } from "./db/client";
 import { seedDatabase } from "./db/seed";
 import { handleMcp } from "./mcp";
 import apiRouter, { apiErrorHandler } from "./routes";
@@ -99,7 +99,6 @@ await initializeDatabase();
 await initializeStorage();
 await seedDatabase();
 await reconcileSystem();
-collectRuntimeGarbage();
 const publicSettings = await getPublicSettings();
 if (!publicSettings.initialized) {
   logger.warn(
@@ -121,7 +120,7 @@ const server = app.listen(config.PORT, () => {
       deploymentMode: config.DEPLOYMENT_MODE,
       memoryRssMb: Math.round(memory.rss / 1024 / 1024),
       memoryExternalMb: Math.round(memory.external / 1024 / 1024),
-      ...(config.DEPLOYMENT_MODE === "single" ? { dataDir: config.PHOSPHENE_DATA_DIR } : {})
+      dataDir: config.PHOSPHENE_DATA_DIR
     },
     "Phosphene is ready"
   );

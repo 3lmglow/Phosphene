@@ -36,49 +36,41 @@ describe("timezone-safe calendar helpers", () => {
 });
 
 describe("deployment topology", () => {
-  it("preserves PGlite memory URLs for isolated tests", () => {
+  it("preserves an in-memory SQLite database for isolated tests", () => {
     expect(
       resolveDeployment({
         nodeEnv: "test",
-        storageDriver: "local",
-        pglitePath: "memory://"
-      }).pglitePath
-    ).toBe("memory://");
+        sqlitePath: ":memory:"
+      }).sqlitePath
+    ).toBe(":memory:");
   });
 
   it("uses one persistent data directory for the default production deployment", () => {
     const deployment = resolveDeployment({
       nodeEnv: "production",
-      storageDriver: "local",
       cwd: process.cwd()
     });
     expect(deployment.mode).toBe("single");
-    expect(deployment.pglitePath.startsWith(deployment.dataDir)).toBe(true);
+    expect(deployment.sqlitePath.startsWith(deployment.dataDir)).toBe(true);
     expect(deployment.localStoragePath.startsWith(deployment.dataDir)).toBe(true);
   });
 
-  it("keeps PostgreSQL plus S3 as the distributed production option", () => {
-    expect(
-      resolveDeployment({
-        nodeEnv: "production",
-        databaseUrl: "postgresql://example.invalid/phosphene",
-        storageDriver: "s3"
-      }).mode
-    ).toBe("distributed");
-  });
-
-  it("rejects mixed or non-persistent production paths", () => {
+  it("rejects temporary or out-of-volume production database paths", () => {
     expect(() =>
       resolveDeployment({
         nodeEnv: "production",
-        databaseUrl: "postgresql://example.invalid/phosphene",
-        storageDriver: "local"
+        sqlitePath: ":memory:"
       })
-    ).toThrow(/requires STORAGE_DRIVER=s3/);
+    ).toThrow(/persistent filesystem SQLITE_PATH/);
     expect(() =>
       resolveDeployment({
         nodeEnv: "production",
-        storageDriver: "local",
+        sqlitePath: "/tmp/phosphene.sqlite"
+      })
+    ).toThrow(/stay inside PHOSPHENE_DATA_DIR/);
+    expect(() =>
+      resolveDeployment({
+        nodeEnv: "production",
         dataDir: "relative-data"
       })
     ).toThrow(/absolute path/);

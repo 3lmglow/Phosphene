@@ -38,27 +38,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  publish-minio:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./infra/minio
-          push: true
-          platforms: linux/amd64,linux/arm64
-          build-args: |
-            MINIO_RELEASE=RELEASE.2025-10-15T17-29-55Z
-          tags: ghcr.io/${{ github.repository }}-minio:RELEASE.2025-10-15T17-29-55Z
-          labels: |
-            org.opencontainers.image.source=https://github.com/minio/minio
-            org.opencontainers.image.version=RELEASE.2025-10-15T17-29-55Z
-          cache-from: type=gha,scope=minio
-          cache-to: type=gha,mode=max,scope=minio

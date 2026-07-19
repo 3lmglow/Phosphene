@@ -10,57 +10,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      PUBLIC_URL: http://localhost:8080
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       PHOSPHENE_SETUP_TOKEN: ${PHOSPHENE_SETUP_TOKEN:-}
       PHOSPHENE_TIMEZONE: ${PHOSPHENE_TIMEZONE:-Asia/Shanghai}
-      DATABASE_URL: postgresql://phosphene:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}@postgresql:5432/phosphene
-      STORAGE_DRIVER: s3
-      S3_ENDPOINT: http://minio:9000
-      S3_REGION: us-east-1
-      S3_BUCKET: phosphene-proofs
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-phosphene}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD before starting}
-      S3_FORCE_PATH_STYLE: "true"
-    depends_on:
-      postgresql:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  postgresql:
-    image: postgres:17.5-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: phosphene
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}
-      POSTGRES_DB: phosphene
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U phosphene -d phosphene"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  minio:
-    image: phosphene-minio:RELEASE.2025-10-15T17-29-55Z
-    build:
-      context: ./infra/minio
-      args:
-        MINIO_RELEASE: RELEASE.2025-10-15T17-29-55Z
-    restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-phosphene}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD before starting}
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+      - phosphene-data:/data
 
 volumes:
-  postgres-data:
-  minio-data:
+  phosphene-data:

@@ -1,11 +1,11 @@
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
-  dialect: "postgresql",
+  dialect: "sqlite",
   schema: "./src/server/db/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgresql://phosphene:phosphene@localhost:5432/phosphene"
+    url: process.env.SQLITE_PATH ?? ".data/phosphene.sqlite"
   },
   strict: true,
   verbose: true

@@ -68,6 +68,6 @@ export async function seedDatabase(): Promise<void> {
     )
     .onConflictDoNothing();
 
-  // Keep PostgreSQL's planner statistics fresh after first boot; harmless in PGlite.
-  await db.execute(sql`analyze`);
+  // Refresh SQLite planner statistics after the built-in data is present.
+  await db.run(sql`analyze`);
 }

@@ -1307,7 +1307,7 @@ function DataSettings() {
         </div>
       )}
       {message && <div className="notice-banner">{message}</div>}
-      <p className="security-note"><ShieldCheck size={15} /> 建议配合 Zeabur 的 PostgreSQL 与 MinIO 持久卷快照一起备份。</p>
+      <p className="security-note"><ShieldCheck size={15} /> 建议定期下载完整备份，并为 Zeabur 的 /data 持久卷创建快照。</p>
     </div>
   );
 }

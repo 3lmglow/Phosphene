@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:' + process.env.PORT + '/healthz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/phosphene-entrypoint"]
-CMD ["node", "--max-old-space-size=128", "--max-semi-space-size=4", "--expose-gc", "dist/server/index.js"]
+CMD ["node", "--max-old-space-size=128", "--max-semi-space-size=4", "dist/server/index.js"]

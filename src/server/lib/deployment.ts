@@ -1,13 +1,9 @@
 import path from "node:path";
 
-export type DeploymentMode = "single" | "distributed";
-
 type DeploymentInput = {
   nodeEnv: "development" | "test" | "production";
-  databaseUrl?: string;
-  storageDriver: "local" | "s3";
   dataDir?: string;
-  pglitePath?: string;
+  sqlitePath?: string;
   localStoragePath?: string;
   cwd?: string;
 };
@@ -15,10 +11,6 @@ type DeploymentInput = {
 function isInside(parent: string, child: string) {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function isPgliteUrl(value: string) {
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 }
 
 export function resolveDeployment(input: DeploymentInput) {
@@ -29,35 +21,26 @@ export function resolveDeployment(input: DeploymentInput) {
   }
 
   const dataDir = path.resolve(cwd, input.dataDir || defaultDataDir);
-  const requestedPglitePath = input.pglitePath || path.join(dataDir, "phosphene");
-  const pglitePath = isPgliteUrl(requestedPglitePath)
-    ? requestedPglitePath
-    : path.resolve(cwd, requestedPglitePath);
+  const requestedSqlitePath = input.sqlitePath || path.join(dataDir, "phosphene.sqlite");
+  const sqlitePath =
+    requestedSqlitePath === ":memory:"
+      ? requestedSqlitePath
+      : path.resolve(cwd, requestedSqlitePath);
   const localStoragePath = path.resolve(
     cwd,
     input.localStoragePath || path.join(dataDir, "uploads")
   );
-  const mode: DeploymentMode = input.databaseUrl ? "distributed" : "single";
 
   if (input.nodeEnv === "production") {
-    if (mode === "distributed" && input.storageDriver !== "s3") {
-      throw new Error("Distributed production mode requires STORAGE_DRIVER=s3");
+    if (sqlitePath === ":memory:") {
+      throw new Error("Production requires a persistent filesystem SQLITE_PATH");
     }
-    if (mode === "single" && input.storageDriver !== "local") {
-      throw new Error("Single-service production mode requires STORAGE_DRIVER=local");
-    }
-    if (mode === "single" && isPgliteUrl(pglitePath)) {
-      throw new Error("Single-service production mode requires a persistent filesystem PGLITE_PATH");
-    }
-    if (
-      mode === "single" &&
-      (!isInside(dataDir, pglitePath) || !isInside(dataDir, localStoragePath))
-    ) {
+    if (!isInside(dataDir, sqlitePath) || !isInside(dataDir, localStoragePath)) {
       throw new Error(
-        "PGLITE_PATH and LOCAL_STORAGE_PATH must stay inside PHOSPHENE_DATA_DIR in single-service production mode"
+        "SQLITE_PATH and LOCAL_STORAGE_PATH must stay inside PHOSPHENE_DATA_DIR in production"
       );
     }
   }
 
-  return { mode, dataDir, pglitePath, localStoragePath };
+  return { mode: "single" as const, dataDir, sqlitePath, localStoragePath };
 }
