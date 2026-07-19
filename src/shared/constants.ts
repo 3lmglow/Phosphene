@@ -16,6 +16,11 @@ export const PROOF_REQUIREMENTS = [
   "text_or_image",
   "text_and_image"
 ] as const;
+export const AI_PROOF_REQUIREMENTS = [
+  "none",
+  "text",
+  "text_and_image"
+] as const;
 export const RECURRENCE_MODES = ["once", "daily"] as const;
 export const REVEAL_MODES = ["immediate", "next_visit", "at_time"] as const;
 export const ACTORS = ["AI", "user", "system"] as const;

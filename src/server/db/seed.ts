@@ -5,7 +5,7 @@ import {
   RETIRED_PRESET_REWARDS
 } from "../../shared/rewards";
 import { getDb } from "./client";
-import { achievements, appSettings, rewardItems, statistics } from "./schema";
+import { achievements, appSettings, auditLogs, rewardItems, statistics } from "./schema";
 
 const achievementDefinitions = [
   ["first_task", "第一束光", "完成第一个任务", "completed", 1, "sparkles"],
@@ -82,6 +82,42 @@ export async function seedDatabase(): Promise<void> {
           eq(rewardItems.cost, retired.cost)
         )
       );
+  }
+
+  // Repair rewards hidden by legacy boolean/default conversions. Explicitly
+  // archived rewards stay archived; only custom rows without an archive audit
+  // are restored to the storefront.
+  await db.run(
+    sql`update reward_items
+        set active = 1
+        where lower(cast(active as text)) in ('true', 't', 'yes')`
+  );
+  const currentPresetIds = new Set<string>(PRESET_REWARDS.map((reward) => reward.id));
+  const hiddenRewards = (await db.select().from(rewardItems))
+    .filter((reward) => {
+      if (reward.active || currentPresetIds.has(reward.id)) return false;
+      const untouchedRetiredPreset = RETIRED_PRESET_REWARDS.some((retired) =>
+        reward.id === retired.id &&
+        reward.name === retired.name &&
+        reward.description === retired.description &&
+        reward.cost === retired.cost
+      );
+      return !untouchedRetiredPreset;
+    });
+  for (const reward of hiddenRewards) {
+    const archived = await db.query.auditLogs.findFirst({
+      where: and(
+        eq(auditLogs.action, "reward.archived"),
+        eq(auditLogs.entityType, "reward"),
+        eq(auditLogs.entityId, reward.id)
+      )
+    });
+    if (!archived) {
+      await db
+        .update(rewardItems)
+        .set({ active: true, updatedAt: new Date() })
+        .where(eq(rewardItems.id, reward.id));
+    }
   }
 
   await db

@@ -175,6 +175,10 @@ describe.sequential("Phosphene domain integration", () => {
       cost: 18,
       active: true
     });
+    await getDb().update(rewardItems).set({ active: false }).where(eq(rewardItems.id, rewardId));
+    await seedDatabase();
+    const repaired = await manageRewards({ action: "list", include_archived: false }) as any[];
+    expect(repaired.some((reward: any) => reward.id === rewardId)).toBe(true);
     await manageRewards({
       action: "archive",
       reward_id: rewardId,
@@ -182,6 +186,47 @@ describe.sequential("Phosphene domain integration", () => {
     });
     const active = await manageRewards({ action: "list", include_archived: false }) as any[];
     expect(active.some((reward: any) => reward.id === rewardId)).toBe(false);
+    await seedDatabase();
+    const stillArchived = await manageRewards({ action: "list", include_archived: false }) as any[];
+    expect(stillArchived.some((reward: any) => reward.id === rewardId)).toBe(false);
+    await manageRewards({
+      action: "restore",
+      reward_id: rewardId,
+      idempotency_key: "integration-restore-custom-reward"
+    });
+    const restored = await manageRewards({ action: "list", include_archived: false }) as any[];
+    expect(restored.some((reward: any) => reward.id === rewardId)).toBe(true);
+    await manageRewards({
+      action: "archive",
+      reward_id: rewardId,
+      idempotency_key: "integration-rearchive-custom-reward"
+    });
+  });
+
+  it("prevents new AI image-only tasks without changing legacy proof support", async () => {
+    const input = {
+      title: "Image-only task",
+      description: "Legacy-compatible proof",
+      type: "daily" as const,
+      difficulty: "easy" as const,
+      base_points: 3,
+      verification_mode: "ai_review" as const,
+      proof_requirement: "image" as const,
+      recurrence: "once" as const,
+      daily_deadline_time: "23:59",
+      reveal_mode: "immediate" as const,
+      idempotency_key: "integration-ai-image-only"
+    };
+    await expect(createTask(input, "AI")).rejects.toMatchObject({
+      code: "ai_image_only_proof_unsupported"
+    });
+    const legacy = await createTask(
+      { ...input, idempotency_key: "integration-legacy-image-only" },
+      "system"
+    );
+    expect(legacy.kind).toBe("task");
+    if (legacy.kind !== "task") throw new Error("Expected legacy one-time task");
+    expect(legacy.task.proofRequirement).toBe("image");
   });
 
   it("caps a failed-task penalty at the available balance and is idempotent", async () => {

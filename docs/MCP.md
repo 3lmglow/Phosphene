@@ -35,8 +35,10 @@ Phosphene 使用无状态 Streamable HTTP；同一个 Endpoint 同时接受 MCP 
 新意图必须使用新 key。
 
 需要 AI 确认的任务通过 query_tasks(status="submitted", include_proof=true) 审核。
-图片会作为 MCP image content 一并返回。只有证据足够时才 approve；reject 时给出清楚、
-不羞辱用户的 reason。
+新任务的 `proof_requirement` 只使用 `none | text | text_and_image`，不要创建纯图片或
+“文字/图片二选一”的任务。图片会作为 MCP image content 一并返回；若当前 AI 客户端不能
+渲染图片，应依据同时提交的文字判断，不得臆测图片内容。只有证据足够时才 approve；
+reject 时给出清楚、不羞辱用户的 reason。
 
 不要替用户兑换奖励，不要尝试修改用户边界，也不要把 Phosphene 数据发到其他服务。
 ```
@@ -47,6 +49,8 @@ Phosphene 使用无状态 Streamable HTTP；同一个 Endpoint 同时接受 MCP 
 
 仅 `daily` 可使用 `recurrence: daily`。Challenge 必须提供带时区偏移的 `deadline`。
 Surprise 通常使用 `reveal_mode: next_visit`；定时揭晓使用 `at_time` + `visible_at`。
+AI 可用的证据要求固定为 `none | text | text_and_image`。这一限制只影响新建任务，
+已有 `image` 或 `text_or_image` 任务仍可正常提交和审核。
 
 重复 daily 使用 `start_date`、可选 `end_date` 和 `daily_deadline_time`。创建结果返回
 `series_id`，当天在有效范围内时还会返回首个任务实例。
@@ -82,7 +86,8 @@ Surprise 通常使用 `reveal_mode: next_visit`；定时揭晓使用 `at_time` +
 
 ### manage_rewards
 
-AI 可列出、新建、修改、归档奖励，查询兑换并标记履行。预设只是初始内容，自定义奖励
+AI 可列出、新建、修改、归档、恢复奖励，查询兑换并标记履行。归档会把项目从 user
+兑换页移除但保留历史，`restore` 可重新上架。预设只是初始内容，自定义奖励
 不需要增加新的 MCP 工具。AI 不能主动替 user 消费。user 兑换后积分会立即扣除，兑换先
 保持 `pending`；奖励真正兑现后再调用 `fulfill_redemption`。
 

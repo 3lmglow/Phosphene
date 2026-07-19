@@ -144,6 +144,11 @@ export const rewardManageSchema = z.discriminatedUnion("action", [
     reward_id: z.string(),
     idempotency_key: z.string().min(8).max(128)
   }),
+  z.object({
+    action: z.literal("restore"),
+    reward_id: z.string(),
+    idempotency_key: z.string().min(8).max(128)
+  }),
   z.object({ action: z.literal("list_redemptions"), status: z.enum(["pending", "fulfilled", "cancelled"]).optional() }),
   z.object({
     action: z.literal("fulfill_redemption"),

@@ -2675,10 +2675,20 @@ body::before {
 }
 
 .filter-bar {
+  width: max-content;
+  max-width: 100%;
   padding: 8px;
+  display: grid;
+  grid-template-columns: max-content 200px;
+  justify-content: start;
+  gap: 8px;
   border-color: rgba(113, 102, 150, 0.16);
   border-radius: 16px;
   background: rgba(253, 252, 255, 0.62);
+}
+
+.filter-bar .segmented {
+  overflow: visible;
 }
 
 .segmented button {
@@ -2694,6 +2704,8 @@ body::before {
 }
 
 .filter-bar select {
+  width: 200px;
+  min-width: 0;
   min-height: 40px;
   font-size: 11px;
 }
@@ -3281,14 +3293,21 @@ body::before {
   }
 
   .filter-bar {
+    width: 100%;
+    max-width: none;
     min-width: 0;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    gap: 8px;
   }
 
   .filter-bar .segmented,
   .segmented--standalone {
     width: 100%;
+    max-width: none;
     min-width: 0;
+    justify-self: stretch;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
@@ -3305,6 +3324,8 @@ body::before {
 
   .filter-bar select {
     width: 100%;
+    max-width: none;
+    justify-self: stretch;
   }
 
   .reward-grid {

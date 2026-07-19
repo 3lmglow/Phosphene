@@ -1265,6 +1265,7 @@ function auditActionLabel(action: string) {
     "reward.created": "创建可兑换奖励",
     "reward.updated": "更新可兑换奖励",
     "reward.archived": "归档可兑换奖励",
+    "reward.restored": "恢复可兑换奖励",
     "reward.redeemed": "提交奖励兑换",
     "redemption.fulfilled": "确认奖励已履行",
     "points.bonus": "发放额外积分",

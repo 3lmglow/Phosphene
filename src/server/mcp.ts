@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
-  PROOF_REQUIREMENTS,
+  AI_PROOF_REQUIREMENTS,
   RECURRENCE_MODES,
   REVEAL_MODES,
   TASK_DIFFICULTIES,
@@ -68,7 +68,7 @@ function createMcpServer() {
 
   server.tool(
     "create_task",
-    "Create a one-time task or a recurring daily task for the user. Respect the user's configured boundaries.",
+    "Create a one-time task or a recurring daily task for the user. Respect the user's configured boundaries. Do not request image-only proof: use none, text, or text_and_image so every reviewed submission includes readable text.",
     {
       title: z.string().min(1).max(120),
       description: z.string().max(4000).optional(),
@@ -76,7 +76,7 @@ function createMcpServer() {
       difficulty: z.enum(TASK_DIFFICULTIES).default("easy"),
       base_points: z.number().int().min(1).max(10000),
       verification_mode: z.enum(VERIFICATION_MODES).default("self"),
-      proof_requirement: z.enum(PROOF_REQUIREMENTS).default("none"),
+      proof_requirement: z.enum(AI_PROOF_REQUIREMENTS).default("none"),
       recurrence: z.enum(RECURRENCE_MODES).default("once"),
       start_date: z.string().optional(),
       end_date: z.string().optional(),
@@ -149,9 +149,9 @@ function createMcpServer() {
 
   server.tool(
     "manage_rewards",
-    "List and configure reward items or fulfill a user's redemption. AI cannot redeem on the user's behalf.",
+    "List and configure reward items or fulfill a user's redemption. Archive removes a reward from the user's storefront without breaking history; restore makes it available again. AI cannot redeem on the user's behalf.",
     {
-      action: z.enum(["list", "create", "update", "archive", "list_redemptions", "fulfill_redemption"]),
+      action: z.enum(["list", "create", "update", "archive", "restore", "list_redemptions", "fulfill_redemption"]),
       include_archived: z.boolean().optional(),
       name: z.string().optional(),
       description: z.string().optional(),
@@ -163,7 +163,7 @@ function createMcpServer() {
       idempotency_key: idempotencyKey()
         .optional()
         .describe(
-          "Required for create, update, archive, and fulfill_redemption. Reuse it only when retrying the exact same write."
+          "Required for create, update, archive, restore, and fulfill_redemption. Reuse it only when retrying the exact same write."
         )
     },
     async (args) => result(await manageRewards(rewardManageSchema.parse(args), "AI"))

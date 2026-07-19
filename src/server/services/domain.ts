@@ -432,6 +432,11 @@ export async function reconcileSystem(now = new Date()) {
 export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
   return getDb().transaction(async (tx: Db) => {
     await reconcileInTransaction(tx);
+    assertState(
+      actor !== "AI" || !["image", "text_or_image"].includes(input.proof_requirement),
+      "ai_image_only_proof_unsupported",
+      "AI-created tasks must use none, text, or text_and_image proof so every reviewed submission includes readable text"
+    );
     return idempotent(tx, "create_task", input.idempotency_key, async () => {
       const settings = await getSettings(tx);
       const today = localDate(new Date(), settings.timezone);
@@ -896,14 +901,22 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
         await audit(tx, actor, "reward.updated", "reward", reward.id, `Updated reward “${reward.name}”`);
         return { reward: updated };
       }
-      if (input.action === "archive") {
+      if (input.action === "archive" || input.action === "restore") {
         const reward = assertFound(
           await tx.query.rewardItems.findFirst({ where: eq(rewardItems.id, input.reward_id) }),
           "Reward not found"
         );
-        await tx.update(rewardItems).set({ active: false, updatedAt: new Date() }).where(eq(rewardItems.id, reward.id));
-        await audit(tx, actor, "reward.archived", "reward", reward.id, `Archived reward “${reward.name}”`);
-        return { reward_id: reward.id, active: false };
+        const active = input.action === "restore";
+        await tx.update(rewardItems).set({ active, updatedAt: new Date() }).where(eq(rewardItems.id, reward.id));
+        await audit(
+          tx,
+          actor,
+          active ? "reward.restored" : "reward.archived",
+          "reward",
+          reward.id,
+          `${active ? "Restored" : "Archived"} reward “${reward.name}”`
+        );
+        return { reward_id: reward.id, active };
       }
       const redemption = assertFound(
         await tx.query.redemptions.findFirst({ where: eq(redemptions.id, input.redemption_id) }),
