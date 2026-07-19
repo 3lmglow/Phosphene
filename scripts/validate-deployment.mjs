@@ -49,12 +49,14 @@ assert(
 );
 assert(compose.services.app.depends_on.postgresql.condition === "service_healthy", "Compose must wait for PostgreSQL");
 assert(compose.services.app.depends_on.minio.condition === "service_healthy", "Compose must wait for MinIO");
-for (const secret of ["PHOSPHENE_SETUP_TOKEN", "SESSION_SECRET"]) {
-  assert(
-    compose.services.app.environment[secret].includes(":?"),
-    `Compose must require ${secret} instead of supplying an insecure production default`
-  );
-}
+assert(
+  compose.services.app.environment.PHOSPHENE_SETUP_TOKEN.includes(":-"),
+  "Compose must allow the app to generate its persistent Setup Token"
+);
+assert(
+  !("SESSION_SECRET" in compose.services.app.environment),
+  "Compose must not require the unused legacy SESSION_SECRET"
+);
 assert(
   minioDockerfile.includes("github.com/minio/minio@${MINIO_RELEASE}") &&
     minioDockerfile.includes("USER minio") &&

@@ -11,9 +11,8 @@ services:
       NODE_ENV: production
       PORT: 8080
       PUBLIC_URL: http://localhost:8080
-      PHOSPHENE_SETUP_TOKEN: ${PHOSPHENE_SETUP_TOKEN:?Set PHOSPHENE_SETUP_TOKEN before starting}
+      PHOSPHENE_SETUP_TOKEN: ${PHOSPHENE_SETUP_TOKEN:-}
       PHOSPHENE_TIMEZONE: ${PHOSPHENE_TIMEZONE:-Asia/Shanghai}
-      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET before starting}
       DATABASE_URL: postgresql://phosphene:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}@postgresql:5432/phosphene
       STORAGE_DRIVER: s3
       S3_ENDPOINT: http://minio:9000

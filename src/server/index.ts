@@ -11,7 +11,7 @@ import { seedDatabase } from "./db/seed";
 import { handleMcp } from "./mcp";
 import apiRouter, { apiErrorHandler } from "./routes";
 import { requireAi } from "./services/auth";
-import { reconcileSystem } from "./services/domain";
+import { getPublicSettings, reconcileSystem } from "./services/domain";
 import { initializeStorage } from "./services/storage";
 
 const logger = pino({
@@ -51,7 +51,7 @@ app.use(
   })
 );
 app.use(pinoHttp({ logger }));
-app.use(cookieParser(config.SESSION_SECRET));
+app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: false, limit: "2mb" }));
 
@@ -99,6 +99,17 @@ await initializeDatabase();
 await initializeStorage();
 await seedDatabase();
 await reconcileSystem();
+const publicSettings = await getPublicSettings();
+if (!publicSettings.initialized && config.SETUP_TOKEN_SOURCE !== "environment") {
+  logger.warn(
+    {
+      setupToken: config.PHOSPHENE_SETUP_TOKEN,
+      source: config.SETUP_TOKEN_SOURCE,
+      ignoredInvalidEnvironmentValue: config.SETUP_TOKEN_ENV_REJECTED
+    },
+    "No valid PHOSPHENE_SETUP_TOKEN was supplied. Use this persisted one-time Setup Token."
+  );
+}
 
 const server = app.listen(config.PORT, () => {
   logger.info(

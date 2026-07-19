@@ -16,11 +16,14 @@ real Phosphene data from the report.
 
 ## Deployment checklist
 
-- Use unique random values of at least 24 characters for `PHOSPHENE_SETUP_TOKEN` and 32 characters
-  for `SESSION_SECRET`.
+- Optionally provide a unique `PHOSPHENE_SETUP_TOKEN` of at least 24 characters. If it is missing,
+  a known placeholder, or too short, Phosphene generates a strong token, stores it with mode `0600`
+  below `/data`, and prints it only while the application still needs first-time setup.
 - Mount a private persistent volume at `/data`; do not use an ephemeral directory.
 - Keep the Phosphene website behind HTTPS.
 - Do not expose the contents of `/data` through a static file server.
+- Treat deployment logs as private until first-time setup is complete because they can contain the
+  automatically generated one-time Setup Token.
 - If using distributed mode, keep PostgreSQL and MinIO/S3 on private networking and use unique
   database and object-storage credentials.
 - Rotate the AI token immediately if it is copied into an untrusted client.

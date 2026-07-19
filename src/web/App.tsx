@@ -264,7 +264,7 @@ function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
         <p className="step-label">首次设置 · {step}/2</p>
         <h2>{step === 1 ? "先确认这是你的空间" : "再告诉我，怎么称呼你们"}</h2>
         <p className="muted">
-          {step === 1 ? "部署时设置的 Setup Token 只用于这一次初始化。" : "这些称呼只影响页面展示，内部权限始终保持 AI / user。"}
+          {step === 1 ? "Setup Token 只用于这一次初始化；未手动配置时，可在部署运行日志中复制自动生成的 setupToken。" : "这些称呼只影响页面展示，内部权限始终保持 AI / user。"}
         </p>
         {error && <InlineError message={error} />}
         {step === 1 ? (
@@ -275,7 +275,7 @@ function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
                 required
                 value={form.setup_token}
                 onChange={(event) => setForm({ ...form, setup_token: event.target.value })}
-                placeholder="粘贴部署环境中的 Setup Token"
+                placeholder="粘贴环境变量或运行日志中的 Setup Token"
               />
             </Field>
             <Field label="登录密码" hint="至少 10 个字符">

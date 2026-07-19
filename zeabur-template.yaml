@@ -127,8 +127,6 @@ spec:
             default: ${PHOSPHENE_SETUP_TOKEN}
           PHOSPHENE_TIMEZONE:
             default: ${PHOSPHENE_TIMEZONE}
-          SESSION_SECRET:
-            default: ${PASSWORD}
           DATABASE_URL:
             default: ${DATABASE_URL}
           STORAGE_DRIVER:
