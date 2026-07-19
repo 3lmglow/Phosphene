@@ -1,9 +1,9 @@
 apiVersion: zeabur.com/v1
 kind: Template
 metadata:
-  name: Phosphene
+  name: Phosphene Distributed
 spec:
-  description: A private task, points, rewards, and companionship space for one user and one AI.
+  description: Optional distributed Phosphene topology with dedicated PostgreSQL and MinIO services.
   icon: https://raw.githubusercontent.com/Obedience-Community/phosphene/main/public/favicon.svg
   variables:
     - key: PUBLIC_DOMAIN
@@ -22,8 +22,10 @@ spec:
     - Tool
     - AI
   readme: |-
-    # Phosphene
+    # Phosphene Distributed
 
+    This advanced template runs separate App, PostgreSQL, and MinIO services. For the normal
+    one-person deployment, connect the repository directly and mount one volume at `/data` instead.
     After all three services are healthy, open the assigned domain and complete the one-time setup.
     Save the AI token shown after setup, then connect your AI client to `https://YOUR_DOMAIN/mcp`
     with `Authorization: Bearer YOUR_AI_TOKEN`.

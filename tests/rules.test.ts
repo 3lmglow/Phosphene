@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DIFFICULTY_MULTIPLIER, streakBonusForDay } from "../src/shared/constants";
 import { addCalendarDays, localDate, localDateTime } from "../src/server/lib/dates";
+import { resolveDeployment } from "../src/server/lib/deployment";
 
 describe("frozen scoring rules", () => {
   it("uses the documented difficulty multipliers", () => {
@@ -31,5 +32,55 @@ describe("timezone-safe calendar helpers", () => {
       "2026-07-19T15:30:00.000Z"
     );
     expect(addCalendarDays("2024-02-28", 1)).toBe("2024-02-29");
+  });
+});
+
+describe("deployment topology", () => {
+  it("preserves PGlite memory URLs for isolated tests", () => {
+    expect(
+      resolveDeployment({
+        nodeEnv: "test",
+        storageDriver: "local",
+        pglitePath: "memory://"
+      }).pglitePath
+    ).toBe("memory://");
+  });
+
+  it("uses one persistent data directory for the default production deployment", () => {
+    const deployment = resolveDeployment({
+      nodeEnv: "production",
+      storageDriver: "local",
+      cwd: process.cwd()
+    });
+    expect(deployment.mode).toBe("single");
+    expect(deployment.pglitePath.startsWith(deployment.dataDir)).toBe(true);
+    expect(deployment.localStoragePath.startsWith(deployment.dataDir)).toBe(true);
+  });
+
+  it("keeps PostgreSQL plus S3 as the distributed production option", () => {
+    expect(
+      resolveDeployment({
+        nodeEnv: "production",
+        databaseUrl: "postgresql://example.invalid/phosphene",
+        storageDriver: "s3"
+      }).mode
+    ).toBe("distributed");
+  });
+
+  it("rejects mixed or non-persistent production paths", () => {
+    expect(() =>
+      resolveDeployment({
+        nodeEnv: "production",
+        databaseUrl: "postgresql://example.invalid/phosphene",
+        storageDriver: "local"
+      })
+    ).toThrow(/requires STORAGE_DRIVER=s3/);
+    expect(() =>
+      resolveDeployment({
+        nodeEnv: "production",
+        storageDriver: "local",
+        dataDir: "relative-data"
+      })
+    ).toThrow(/absolute path/);
   });
 });

@@ -101,7 +101,15 @@ await seedDatabase();
 await reconcileSystem();
 
 const server = app.listen(config.PORT, () => {
-  logger.info({ port: config.PORT, url: config.PUBLIC_URL }, "Phosphene is ready");
+  logger.info(
+    {
+      port: config.PORT,
+      url: config.PUBLIC_URL,
+      deploymentMode: config.DEPLOYMENT_MODE,
+      ...(config.DEPLOYMENT_MODE === "single" ? { dataDir: config.PHOSPHENE_DATA_DIR } : {})
+    },
+    "Phosphene is ready"
+  );
 });
 
 async function shutdown(signal: string) {

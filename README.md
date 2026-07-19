@@ -2,19 +2,19 @@
 
 > 一位 user 与一位 AI 的私人任务、积分、奖励与陪伴空间。
 
-Phosphene 是可独立部署的正式 1.0 产品：AI 通过 MCP 创建和管理任务，user 在网站完成任务、
-提交文字或图片证据、累积积分、保持连击、解锁成就并兑换奖励。每个实例只有一位 user 和一位
-AI，没有公开注册、多租户或第三方数据平台。
+Phosphene 是可独立部署的正式 1.0 产品。AI 通过 MCP 创建和管理任务，user 在网站完成任务、提交文字或图片证据、积累积分、保持连击、解锁成就并兑换奖励。每个实例固定服务一位 user 和一位 AI，不包含公开注册、多租户或第三方数据平台。
+
+第一版按正式产品标准建设，不是临时雏形，也不依赖“以后再重构”才能安全使用。
 
 ## 已实现
 
 - `daily`、`challenge`、`surprise` 三类任务
-- daily 一次性或每日重复；规则与每日实例分离，支持暂停、恢复和修改未来实例
+- daily 一次性或每日重复；重复规则与每日实例分离，可暂停、恢复和修改未来实例
 - easy / medium / hard 难度倍率与不可变积分账本
 - self / ai_review 两种确认方式
 - 无证据、文字、图片、文字或图片、文字和图片五种证据要求
-- 图片真实格式检查、像素限制、Sharp 重新编码、EXIF/GPS 清除与私有审核预览
-- 逾期/失败扣 50%，余额不低于 0，AI 每日扣分上限与 user 暂停开关
+- 图片真实格式与像素检查、Sharp 重新编码、EXIF/GPS 清除、私有审核预览
+- 失败/逾期扣 50%，余额不低于 0，AI 每日扣分上限与 user 暂停开关
 - 按时区计算的连击、延迟审核历史补算、总坚持天数和完整统计
 - 25 个内置成就
 - 奖励商城、原子兑换、AI 履行队列
@@ -22,25 +22,25 @@ AI，没有公开注册、多租户或第三方数据平台。
 - 恰好 7 个 MCP 工具
 - 数据库与私有图片的 ZIP 导出/恢复
 - 响应式桌面与手机网站
-- PostgreSQL + S3/MinIO 生产架构；PGlite + 本地私有目录开发架构
-- Docker、Docker Compose、Zeabur Template、GitHub CI 与多架构容器发布
-- MinIO 使用官方安全修复源码标签构建，不依赖停止更新的旧社区容器
+- 默认单服务生产架构；可选 PostgreSQL + S3/MinIO 分布式架构
+- Docker、可选 Docker Compose/Zeabur Distributed Template、GitHub CI 与多架构容器发布
 
-产品冻结规格见 [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)。
+冻结产品规格见 [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)。
 
-## 架构
+## 默认架构
 
 ```mermaid
 flowchart LR
   AI["AI / MCP client"] -->|"Bearer Token · /mcp"| APP["Phosphene · Express + React"]
   USER["user / browser"] -->|"Session + CSRF · /api"| APP
-  APP --> PG[("PostgreSQL")]
-  APP --> S3[("Private S3 / MinIO")]
-  APP --> WEB["Single-domain website"]
+  APP --> DATA[("一个私有持久化卷 /data")]
+  DATA --> DB["PGlite 数据库"]
+  DATA --> IMG["私有图片"]
 ```
 
-网页、REST API 和 Streamable HTTP MCP 共用一个域名。数据库保存结构化记录与对象 Key；原图和
-预览图只存在私有对象存储中。
+网页、REST API 和 Streamable HTTP MCP 共用一个域名。对一人一 AI 的私人服务，默认的 PGlite 与本地私有图片存储已经是正式生产方案，不需要额外部署数据库或对象存储。
+
+只有需要把数据库和文件分别扩容、独立备份或迁移时，才启用可选的 PostgreSQL + S3/MinIO 模式。
 
 ## 本地开发
 
@@ -54,15 +54,32 @@ cp .env.example .env
 pnpm dev
 ```
 
-打开 `http://localhost:3000`。不设置 `DATABASE_URL` 时自动使用 `.data/phosphene` 中的
-PGlite；`STORAGE_DRIVER=local` 时图片保存在 `.data/uploads`。这套本地模式与生产领域逻辑完全
-相同，不需要先安装 PostgreSQL 或 MinIO。
+打开 `http://localhost:3000`。默认数据在 `.data/phosphene`，图片在 `.data/uploads`。首次设置使用 `.env` 中的 `PHOSPHENE_SETUP_TOKEN`；完成设置后页面只显示一次 AI Token。
 
-首次设置使用 `.env` 中的 `PHOSPHENE_SETUP_TOKEN`。完成后页面只显示一次 AI Token。
+## 最简单的 Zeabur 部署
 
-## 使用 Docker Compose
+正常使用不需要 Template、PostgreSQL 或 MinIO。只部署 GitHub 仓库对应的一个服务：
 
-先设置强随机密钥：
+1. 在 Zeabur 新建项目，选择 **Deploy New Service → Git**，连接 Phosphene 仓库。
+2. Zeabur 会从仓库根目录识别 `Dockerfile`。为该服务添加一个持久化卷，挂载目录必须是 `/data`。
+3. 设置两个必填环境变量：
+
+   ```text
+   PHOSPHENE_SETUP_TOKEN=至少24位的随机字符串
+   SESSION_SECRET=至少32位的另一段随机字符串
+   ```
+
+4. 可选设置 `PHOSPHENE_TIMEZONE=Asia/Shanghai`。不要设置 `DATABASE_URL`、`S3_*`；`STORAGE_DRIVER` 保持 `local` 或不填。
+5. 给服务绑定 Zeabur 域名。Zeabur 会提供 `PORT` 与 `ZEABUR_WEB_URL`，应用会自动识别。
+6. 打开域名完成首次设置，立即保存只显示一次的 `phosphene_ai_...` Token。
+
+服务重启或重新构建不会丢数据，因为数据库和图片都位于 `/data`。删除服务或持久化卷会删除其中的数据，操作前先从网站导出 ZIP。
+
+完整运维说明见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+
+## 可选的分布式部署
+
+仓库保留 `docker-compose.yml` 与 [zeabur-template.yaml](zeabur-template.yaml)，用于需要独立 PostgreSQL 和 MinIO 的高级部署。它们不是普通私人实例的前置要求。
 
 ```bash
 export PHOSPHENE_SETUP_TOKEN="replace-with-a-long-random-value"
@@ -72,36 +89,6 @@ export MINIO_ROOT_USER="phosphene"
 export MINIO_ROOT_PASSWORD="replace-with-a-random-storage-password"
 docker compose up -d --build
 ```
-
-打开 `http://localhost:8080`。PostgreSQL 与 MinIO 使用命名卷，重启和重新构建不会丢失数据。
-
-## 部署到 Zeabur
-
-仓库包含 [zeabur-template.yaml](zeabur-template.yaml)，一次创建 Phosphene、PostgreSQL 和
-MinIO 三个服务，并为网站绑定域名。Zeabur 当前从根目录检测 Dockerfile，并会向 Git 服务注入
-`PORT`；Template 用 `dependencies` 等待两个数据服务，用私有服务变量拼接连接地址。
-
-### 首次发布
-
-1. 把仓库推送到 GitHub。默认模板与容器工作流面向
-   `Obedience-Community/phosphene`；如果使用其他仓库，请把 `zeabur-template.yaml` 中的图标和
-   `ghcr.io/obedience-community/phosphene:1.0.0` 改成你的地址。
-2. GitHub Actions 的 `Container` 工作流会发布 `linux/amd64` 与 `linux/arm64` 的应用镜像和
-   `phosphene-minio` 镜像到 GHCR。后者从 MinIO 官方
-   `RELEASE.2025-10-15T17-29-55Z` 安全修复源码标签构建，不使用停留在修复前的旧社区镜像。
-   若仓库为私有仓库，需要让 Zeabur 有权拉取这些镜像；公开部署建议把容器包设为 public。
-3. 安装 Zeabur CLI 并登录：
-
-   ```bash
-   npx zeabur@latest template deploy -f zeabur-template.yaml
-   ```
-
-4. 部署向导中选择域名，填写长随机 `PHOSPHENE_SETUP_TOKEN` 和 IANA 时区。
-5. 三个服务健康后打开域名，完成首次设置并保存一次性 AI Token。
-
-模板依据 Zeabur 的
-[Template Resource 格式](https://zeabur.com/docs/en-US/template/template-format)；Dockerfile 部署规则见
-[Zeabur Dockerfile 文档](https://zeabur.com/docs/en-US/deploy/methods/dockerfile)。
 
 ## 连接 AI
 
@@ -117,7 +104,7 @@ https://YOUR_PHOSPHENE_DOMAIN/mcp
 Authorization: Bearer phosphene_ai_...
 ```
 
-支持 HTTP MCP 配置的客户端通常可使用：
+通用 HTTP MCP 客户端配置示例：
 
 ```json
 {
@@ -133,7 +120,7 @@ Authorization: Bearer phosphene_ai_...
 }
 ```
 
-具体字段以客户端当前文档为准。详细工具说明和推荐提示词见 [docs/MCP.md](docs/MCP.md)。
+具体字段以客户端当前文档为准。工具说明见 [docs/MCP.md](docs/MCP.md)。
 
 ## 七个 MCP 工具
 
@@ -154,44 +141,38 @@ Authorization: Bearer phosphene_ai_...
 - 任务积分：`base_points × easy 1 / medium 2 / hard 3`
 - 失败或逾期：扣任务最终积分的 50%，但余额不降到 0 以下
 - 每个自然日至少完成一个任意类型任务即延续连击
-- 连击第 1 天 +0；第 2～5 天每天 +1；第 6～7 天每天 +2；第 8 天起每天 +3
-- AI 延迟审核时，完成记录归 user 实际提交的当地日期；系统会追加校正流水补算后续连击
-
-账本记录不会被修改或删除。需要修正时只能追加 `correction`。
+- 连击第 1 天 +0；第 2–5 天每天 +1；第 6–7 天每天 +2；第 8 天起每天 +3
+- AI 延迟审核时，完成记录归 user 实际提交的当地日期，并通过校正流水补算后续连击
 
 ## 图片隐私
 
 - 仅接受真实 JPEG、PNG、WebP
-- 每次最多 4 张，单张最多 10 MB，最多 2400 万像素
-- 服务端旋转到正确方向并重新编码为 WebP，原 EXIF/GPS 不会保留
-- AI 通过 `query_tasks(include_proof: true)` 收到私有预览图片内容块
-- 网站图片路由要求 user 会话；Bucket 不配置公开读
+- 每次最多 4 张，单张最多 10 MB，最大 2400 万像素
+- 服务端旋转到正确方向并重新编码为 WebP，不保留原 EXIF/GPS
+- 网站图片路由要求 user 会话；AI 仅通过受认证 MCP 收到审核预览
+- 单服务模式下图片保存在 `/data/uploads`，不会由静态目录公开
 
 ## 备份与恢复
 
-“设置 → 数据与备份”可下载完整 ZIP，包含数据库业务记录、图片原件和审核预览。恢复前必须输入
-当前网站密码，且会替换任务、积分、兑换、历史和图片数据；密码、网站会话和 AI Token 不会从
-备份覆盖。
+“设置 → 数据与备份”可下载完整 ZIP，包含业务记录、图片原件和审核预览。恢复需要当前网站密码，且不会覆盖密码、会话或 AI Token。
 
-生产环境还应启用 Zeabur 的 PostgreSQL 与 MinIO 持久卷快照。应用备份用于跨实例迁移和可验证
-恢复，基础设施快照用于灾难恢复，两者不能互相替代。
+单服务模式应同时备份整个 `/data` 卷；分布式模式则分别快照 PostgreSQL 与 MinIO。网站 ZIP 用于迁移和可验证恢复，基础设施快照用于灾难恢复，两者不能互相替代。
 
 ## 环境变量
 
 | 变量 | 说明 |
 | --- | --- |
-| `PORT` | HTTP 监听端口 |
-| `PUBLIC_URL` | 网站公开 HTTPS 地址 |
-| `PHOSPHENE_SETUP_TOKEN` | 一次性初始化凭证 |
-| `PHOSPHENE_TIMEZONE` | 初始化默认时区 |
-| `SESSION_SECRET` | Cookie/会话秘密，至少 16 字符，生产建议 32+ |
-| `DATABASE_URL` | PostgreSQL 连接串；生产必填 |
-| `STORAGE_DRIVER` | `local` 或 `s3`；生产必须为 `s3` |
-| `S3_ENDPOINT` | MinIO/S3 地址 |
-| `S3_REGION` | S3 region |
-| `S3_BUCKET` | 私有 Bucket；不存在时自动创建 |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | S3 凭证 |
-| `S3_FORCE_PATH_STYLE` | MinIO 通常为 `true` |
+| `PORT` | HTTP 监听端口；Zeabur 自动提供 |
+| `PUBLIC_URL` | 可选公开 HTTPS 地址；未填时自动使用 `ZEABUR_WEB_URL` |
+| `PHOSPHENE_SETUP_TOKEN` | 一次性初始化凭证；生产至少 24 字符 |
+| `PHOSPHENE_TIMEZONE` | 初始默认时区 |
+| `SESSION_SECRET` | Cookie/会话秘密；生产至少 32 字符 |
+| `PHOSPHENE_DATA_DIR` | 单服务持久化根目录；生产默认 `/data` |
+| `PGLITE_PATH` | 可选 PGlite 路径覆盖，必须位于数据目录内 |
+| `LOCAL_STORAGE_PATH` | 可选图片路径覆盖，必须位于数据目录内 |
+| `DATABASE_URL` | 可选；设置后切换到 PostgreSQL 分布式模式 |
+| `STORAGE_DRIVER` | 默认 `local`；分布式对象存储使用 `s3` |
+| `S3_*` | 仅 `STORAGE_DRIVER=s3` 时需要 |
 
 完整示例见 [.env.example](.env.example)。
 
@@ -204,18 +185,16 @@ pnpm build
 pnpm check
 ```
 
-测试包含时区边界、连击奖励、重复 daily 幂等、延迟审核补算、兑换原子性、失败扣分和完整备份
-恢复。CI 对每个 PR 执行类型检查、16 项自动测试、部署清单校验、生产构建和
-`git diff --check`。
+CI 会执行类型检查、20 项自动测试、部署清单校验、生产构建和 `git diff --check`。
 
 ## 安全边界
 
-- AI 无权修改密码、边界或替 user 兑换
+- AI 无权修改密码、用户边界或替 user 兑换
 - user 的边界修改会提高版本号并写入审计日志
 - `punishments_paused` 开启后，服务端直接拒绝 AI 扣分
 - MCP Token 只显示一次，数据库只保存 SHA-256 哈希，可随时轮换
 - 登录密码使用 Argon2id；写请求需要 SameSite Cookie 与 CSRF Token
-- 生产启动会拒绝默认 Setup Token、默认 Session Secret、非 PostgreSQL 或非 S3 配置
+- 生产启动拒绝默认 Setup Token、过短 Session Secret、混合或越界持久化路径
 
 部署前请阅读 [SECURITY.md](SECURITY.md)。
 

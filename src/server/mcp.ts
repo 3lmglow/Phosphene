@@ -36,6 +36,15 @@ function result(data: unknown) {
   };
 }
 
+const idempotencyKey = () =>
+  z
+    .string()
+    .min(8)
+    .max(128)
+    .describe(
+      "A stable unique key for this intended write. Reuse the same key only when retrying the exact same operation."
+    );
+
 async function taskResultWithProofImages(data: any) {
   const content: Array<
     { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
@@ -76,7 +85,7 @@ function createMcpServer() {
       reveal_mode: z.enum(REVEAL_MODES).default("immediate"),
       visible_at: z.string().optional(),
       related_task_id: z.string().optional(),
-      idempotency_key: z.string().min(8).max(128)
+      idempotency_key: idempotencyKey()
     },
     async (args) => result(await createTask(createTaskSchema.parse(args), "AI"))
   );
@@ -116,7 +125,7 @@ function createMcpServer() {
       deadline: z.string().optional(),
       decision: z.enum(["approve", "reject"]).optional(),
       reason: z.string().optional(),
-      idempotency_key: z.string().min(8).max(128)
+      idempotency_key: idempotencyKey()
     },
     async (args) => result(await manageTask(manageTaskSchema.parse(args), "AI"))
   );
@@ -151,7 +160,11 @@ function createMcpServer() {
       status: z.enum(["pending", "fulfilled", "cancelled"]).optional(),
       redemption_id: z.string().optional(),
       note: z.string().optional(),
-      idempotency_key: z.string().optional()
+      idempotency_key: idempotencyKey()
+        .optional()
+        .describe(
+          "Required for create, update, archive, and fulfill_redemption. Reuse it only when retrying the exact same write."
+        )
     },
     async (args) => result(await manageRewards(rewardManageSchema.parse(args), "AI"))
   );
@@ -164,7 +177,7 @@ function createMcpServer() {
       amount: z.number().int().min(-100000).max(100000).refine((value) => value !== 0),
       reason: z.string().min(1).max(1000),
       related_task_id: z.string().optional(),
-      idempotency_key: z.string().min(8).max(128)
+      idempotency_key: idempotencyKey()
     },
     async (args) => result(await adjustPoints(adjustPointsSchema.parse(args), "AI"))
   );

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.data/
+.env
+.env.local
+coverage/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+.idea/
+.vscode/

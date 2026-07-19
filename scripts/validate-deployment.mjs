@@ -8,6 +8,13 @@ function assert(condition, message) {
 const zeabur = parse(fs.readFileSync("zeabur-template.yaml", "utf8"));
 const compose = parse(fs.readFileSync("docker-compose.yml", "utf8"));
 const minioDockerfile = fs.readFileSync("infra/minio/Dockerfile", "utf8");
+const appDockerfile = fs.readFileSync("Dockerfile", "utf8");
+const entrypoint = fs.readFileSync("docker-entrypoint.sh", "utf8");
+
+assert(appDockerfile.includes('VOLUME ["/data"]'), "Single-service image must declare the /data volume");
+assert(appDockerfile.includes("docker-entrypoint.sh"), "Single-service image must install its entrypoint");
+assert(entrypoint.includes('PHOSPHENE_DATA_DIR:-/data'), "Entrypoint must default to /data");
+assert(entrypoint.includes('exec gosu node "$@"'), "Entrypoint must drop privileges before starting");
 
 assert(zeabur.apiVersion === "zeabur.com/v1", "Unexpected Zeabur apiVersion");
 assert(zeabur.kind === "Template", "Zeabur resource must be a Template");
@@ -55,4 +62,4 @@ assert(
   "MinIO image must build the pinned official source as non-root and include its license"
 );
 
-console.log("Docker Compose and Zeabur deployment manifests are valid.");
+console.log("Single-service image and optional distributed deployment manifests are valid.");
