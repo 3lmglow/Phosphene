@@ -47,6 +47,7 @@ export const config = {
   PHOSPHENE_DATA_DIR: deployment.dataDir,
   SQLITE_PATH: deployment.sqlitePath,
   LOCAL_STORAGE_PATH: deployment.localStoragePath,
+  BACKUP_TEMP_PATH: deployment.backupTempPath,
   DEPLOYMENT_MODE: deployment.mode,
   SETUP_PROTECTED: Boolean(parsed.PHOSPHENE_SETUP_TOKEN)
 };

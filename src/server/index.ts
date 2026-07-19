@@ -8,11 +8,19 @@ import pinoHttp from "pino-http";
 import { config } from "./config";
 import { initializeDatabase, shutdownDatabase } from "./db/client";
 import { seedDatabase } from "./db/seed";
+import { AppError } from "./errors";
 import { handleMcp } from "./mcp";
 import apiRouter, { apiErrorHandler } from "./routes";
 import { requireAi } from "./services/auth";
+import {
+  beginApplicationRequest,
+  getActiveBackupOperation
+} from "./services/backup";
 import { getPublicSettings, reconcileSystem } from "./services/domain";
-import { initializeStorage } from "./services/storage";
+import {
+  initializeStorage,
+  pruneOrphanedProofFiles
+} from "./services/storage";
 
 const logger = pino({
   level: config.LOG_LEVEL,
@@ -58,6 +66,35 @@ app.use(express.urlencoded({ extended: false, limit: "2mb" }));
 
 app.get("/healthz", (_request, response) => {
   response.json({ status: "ok", version: "1.0.0" });
+});
+app.use((request, response, next) => {
+  const backupRoute =
+    request.path === "/api/backup/export" ||
+    request.path === "/api/backup/restore";
+  if (backupRoute) {
+    const operation = getActiveBackupOperation();
+    if (operation) {
+      next(
+        new AppError(
+          503,
+          "backup_maintenance",
+          `A backup ${operation} operation is already in progress`
+        )
+      );
+      return;
+    }
+    next();
+    return;
+  }
+
+  try {
+    const release = beginApplicationRequest();
+    response.once("finish", release);
+    response.once("close", release);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 app.use("/api", apiRouter);
 app.use("/api", (_request, response) => {
@@ -110,6 +147,7 @@ app.use(apiErrorHandler);
 
 await initializeDatabase();
 await initializeStorage();
+await pruneOrphanedProofFiles();
 await seedDatabase();
 await reconcileSystem();
 const publicSettings = await getPublicSettings();

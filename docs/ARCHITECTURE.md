@@ -38,6 +38,10 @@ self 任务提交后立即完成。ai_review 先写 submission 和 `submitted_at
 
 兑换在一个数据库事务中读取服务端价格、检查余额、创建 redemption、写负数账本与审计记录。
 
+AI 主动调用 `manage_task(action="fail")` 与 `adjust_points(kind="penalty")` 都读取 user
+惩罚设置，并依据审计事实共用同一自然日的 AI 扣分上限。系统自动处理逾期时使用
+`actor=system`，不占用 AI 主动惩罚额度。
+
 ## MCP 边界
 
 同一 Express 服务在 `/mcp` 提供无状态 Streamable HTTP MCP。默认使用静态 AI Token，
@@ -57,7 +61,8 @@ AI 工具固定为 7 个，user 的提交、上传、设置和兑换保持在受
 - AI：默认静态 Token（Bearer 或专用 Header），数据库只保存 SHA-256
 - 密码：Argon2id
 - 写入口：Zod 校验、速率限制、审计日志
-- 上传：Multer 内存限额 → Sharp 真格式/像素校验 → 重新编码 → 私有存储
+- 证据上传：Multer 单图内存限额 → Sharp 真格式/像素校验 → 重新编码 → 私有存储
+- 备份上传：Multer 磁盘暂存 → ZIP 路径/数量/大小校验 → WebP 哈希与像素校验
 - 容器：入口以 root 处理卷权限，随后通过 `gosu` 降权为 `node`
 - 数据库：SQLite 启用 foreign keys、WAL、NORMAL synchronous 与 busy timeout；容器同时约束 V8 堆
 - 卷兼容：入口允许 root-squash 环境拒绝 `chown`，但在降权前必须验证 `node` 对数据目录有写权限
@@ -68,6 +73,18 @@ AI 工具固定为 7 个，user 的提交、上传、设置和兑换保持在受
 
 ## 备份
 
-导出 ZIP 包含版本化 JSON manifest 与所有图片对象。恢复入口会验证当前密码；账户密码、会话和 AI Token 不参与覆盖。当前带图片就地恢复、对象 Key 校验和大型归档内存占用仍需加固，详见 [已知问题](KNOWN_ISSUES.md)。
+导出 ZIP 包含版本化 JSON manifest、幂等响应与所有图片对象。业务表在一个 SQLite 读事务中
+取得一致性快照，图片从私有目录直接写入 ZIP 响应流。导出和恢复共用进程内维护锁：先等待已经
+进入的业务请求结束，再阻止新的 REST、MCP 和网页请求；`/healthz` 不受影响。
 
-生产运维应同时快照整个 `/data` 卷，使数据库与图片在同一个时间点恢复；在 ZIP 恢复加固完成前，卷快照是主要灾难恢复手段。
+恢复上传先落盘到 `/data/tmp`，再用 lazy-entry 方式逐项读取。归档路径必须命中 manifest
+引用的严格白名单；原图会校验大小、SHA-256、WebP 真格式、像素和尺寸，预览图也会重新解析。
+服务端为恢复图片生成新的对象 Key，因此同一备份可以在原实例就地恢复。文件全部通过校验后，
+业务表和 `idempotency_keys` 才在一个数据库事务中替换；密码、会话和 AI Token 表不参与覆盖。
+事务提交后删除旧图片，进程下次启动还会清理没有数据库引用的残留图片目录和临时上传。
+
+version 2 是当前格式；恢复器兼容不含幂等表的 version 1，并在导入旧格式时清空目标实例的旧
+幂等记录。详细限制和操作流程见 [备份与恢复](BACKUP.md)。
+
+生产运维仍应同时快照整个 `/data` 卷：卷快照负责包含凭证的完整灾难恢复，网站 ZIP 负责业务
+数据下载、迁移和时间点恢复，两者不能互相完全替代。

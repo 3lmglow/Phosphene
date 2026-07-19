@@ -36,9 +36,14 @@ LOCAL_STORAGE_PATH=/data/uploads
 ### 内存不足 / OOM / Exit 137
 
 - 普通启动建议至少 512 MB 内存；
-- 若错误发生在导出或恢复 ZIP 时，先停止重复操作，改用 `/data` 卷快照；
+- ZIP 已采用流式导出和磁盘恢复；若仍在该操作期间 OOM，记录 ZIP 大小与 Metrics 后提交问题；
 - 若错误发生在图片提交时，确认单张不超过 10 MB、总数不超过 4 张；
 - 查看 Zeabur Metrics，区分 Node 堆限制与平台容器内存上限。
+
+### `ENOSPC` / No space left on device
+
+恢复期间上传 ZIP、旧图片和新图片会短暂同时存在。先保留或回挂恢复前卷快照，再扩容 `/data`；
+不要通过手工删除 `/data/uploads` 腾空间。容量估算见 [备份与恢复](BACKUP.md)。
 
 ## 部署或重启后回到首次设置页
 
@@ -111,9 +116,24 @@ LOCAL_STORAGE_PATH=/data/uploads
 
 AI 必须通过 `query_tasks(status="submitted", include_proof=true)` 查询，服务端才会附带审核预览。AI 新建任务只开放 `none`、`text`、`text_and_image`，因此需要图片时也会同时有文字证据。
 
-### ZIP 恢复遇到已存在文件或实例重启
+### ZIP 恢复返回 `invalid_backup`
 
-见 [已知问题](KNOWN_ISSUES.md)。保留原卷，不要连续重复恢复；优先使用 `/data` 卷快照。
+- 只选择由自己实例导出的原始 ZIP，不要解压后重新打包；
+- 检查浏览器下载是否完整；
+- 旧 version 1 ZIP 仍受支持，不需要手工转换；
+- 保留恢复前卷快照和错误信息，不要连续上传来源不明的文件。
+
+### 页面短暂返回 `503 backup_maintenance`
+
+导出或恢复开始后，Phosphene 会等待已进入的请求结束并短暂关闭业务入口，防止备份时间点
+不一致。等待当前操作完成即可；`/healthz` 仍应返回 200。若没有人在操作备份但状态长期不消失，
+检查服务是否正在重启或恢复是否因卷空间不足卡住。
+
+### 恢复后图片仍异常
+
+同一 ZIP 支持在原实例就地恢复，不会再因旧对象 Key 已存在而失败。先检查恢复是否明确返回成功，
+再打开历史任务验证；如果只有某张图片失败，保留 ZIP、任务 id 和相关日志并提交问题，不要删除
+整个 `/data/uploads`。
 
 ## PWA 没更新或不能安装
 

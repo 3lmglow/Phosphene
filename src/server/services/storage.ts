@@ -7,6 +7,8 @@ import {
   MAX_PROOF_IMAGES
 } from "../../shared/constants";
 import { config } from "../config";
+import { getDb } from "../db/client";
+import { proofAssets } from "../db/schema";
 import { AppError } from "../errors";
 import { createId, sha256 } from "../lib/ids";
 
@@ -21,34 +23,99 @@ export interface StoredProof {
   height: number;
 }
 
+const proofObjectKeyPattern =
+  /^proofs\/proof_[A-Za-z0-9_-]+\/(original|preview)\.webp$/;
+
+export function isValidProofObjectKey(key: string): boolean {
+  return proofObjectKeyPattern.test(key);
+}
+
+export function getObjectPath(key: string): string {
+  if (!isValidProofObjectKey(key)) {
+    throw new AppError(400, "invalid_object_key", "Proof object key is invalid");
+  }
+  const root = path.resolve(config.LOCAL_STORAGE_PATH);
+  const target = path.resolve(root, ...key.split("/"));
+  const relative = path.relative(root, target);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new AppError(400, "invalid_object_key", "Proof object key leaves private storage");
+  }
+  return target;
+}
+
 export async function initializeStorage(): Promise<void> {
-  await fs.mkdir(config.LOCAL_STORAGE_PATH, { recursive: true });
+  await Promise.all([
+    fs.mkdir(config.LOCAL_STORAGE_PATH, { recursive: true }),
+    fs.mkdir(config.BACKUP_TEMP_PATH, { recursive: true })
+  ]);
+  const temporaryFiles = await fs.readdir(config.BACKUP_TEMP_PATH, {
+    withFileTypes: true
+  });
+  await Promise.allSettled(
+    temporaryFiles
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          /^backup_upload_[A-Za-z0-9_-]+\.zip$/.test(entry.name)
+      )
+      .map((entry) =>
+        fs.rm(path.join(config.BACKUP_TEMP_PATH, entry.name), { force: true })
+      )
+  );
+}
+
+export async function pruneOrphanedProofFiles(): Promise<void> {
+  const proofRoot = path.resolve(config.LOCAL_STORAGE_PATH, "proofs");
+  const directories = await fs
+    .readdir(proofRoot, { withFileTypes: true })
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+  const referenced = new Set(
+    (await getDb().select({
+      objectKey: proofAssets.objectKey,
+      previewKey: proofAssets.previewKey
+    }).from(proofAssets)).flatMap((asset) => [
+      asset.objectKey,
+      asset.previewKey
+    ])
+  );
+  await Promise.allSettled(
+    directories
+      .filter((entry) => entry.isDirectory() && /^proof_[A-Za-z0-9_-]+$/.test(entry.name))
+      .filter(
+        (entry) =>
+          !referenced.has(`proofs/${entry.name}/original.webp`) &&
+          !referenced.has(`proofs/${entry.name}/preview.webp`)
+      )
+      .map((entry) => {
+        const target = path.resolve(proofRoot, entry.name);
+        const relative = path.relative(proofRoot, target);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
+          return Promise.reject(new Error("Refused to clean a proof path outside private storage"));
+        }
+        return fs.rm(target, { recursive: true, force: true });
+      })
+  );
 }
 
 async function putObject(key: string, body: Buffer): Promise<void> {
-  const target = path.join(config.LOCAL_STORAGE_PATH, ...key.split("/"));
+  const target = getObjectPath(key);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, body, { flag: "wx" });
 }
 
-export async function putRestoredObject(
-  key: string,
-  body: Buffer,
-  _contentType = "image/webp"
-): Promise<void> {
-  await putObject(key, body);
-}
-
 export async function getObject(key: string): Promise<Buffer> {
   try {
-    return await fs.readFile(path.join(config.LOCAL_STORAGE_PATH, ...key.split("/")));
+    return await fs.readFile(getObjectPath(key));
   } catch {
     throw new AppError(404, "asset_not_found", "Proof image not found");
   }
 }
 
 export async function deleteObject(key: string): Promise<void> {
-  await fs.rm(path.join(config.LOCAL_STORAGE_PATH, ...key.split("/")), { force: true });
+  await fs.rm(getObjectPath(key), { force: true });
 }
 
 export async function saveProofImages(files: Express.Multer.File[]): Promise<StoredProof[]> {

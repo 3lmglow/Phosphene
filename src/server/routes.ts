@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
@@ -11,9 +13,11 @@ import {
   submitTaskSchema,
   taskQuerySchema
 } from "../shared/schemas";
+import { config } from "./config";
 import { getDb } from "./db/client";
 import { proofAssets } from "./db/schema";
 import { AppError, assertFound } from "./errors";
+import { createId } from "./lib/ids";
 import {
   changePassword,
   listAiTokens,
@@ -25,7 +29,11 @@ import {
   setupApplication,
   verifyPassword
 } from "./services/auth";
-import { exportBackup, restoreBackup } from "./services/backup";
+import {
+  MAX_BACKUP_ARCHIVE_BYTES,
+  restoreBackupFromFile,
+  streamBackup
+} from "./services/backup";
 import {
   getOverview,
   getPublicSettings,
@@ -53,8 +61,13 @@ const upload = multer({
   limits: { fileSize: MAX_PROOF_IMAGE_BYTES, files: MAX_PROOF_IMAGES, fields: 10 }
 });
 const backupUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 512 * 1024 * 1024, files: 1, fields: 3 }
+  storage: multer.diskStorage({
+    destination: config.BACKUP_TEMP_PATH,
+    filename: (_request, _file, callback) => {
+      callback(null, `${createId("backup_upload")}.zip`);
+    }
+  }),
+  limits: { fileSize: MAX_BACKUP_ARCHIVE_BYTES, files: 1, fields: 3 }
 });
 
 function asyncRoute(
@@ -256,15 +269,21 @@ router.put(
 router.get(
   "/backup/export",
   asyncRoute(async (_request, response) => {
-    const archive = await exportBackup();
     const stamp = new Date().toISOString().slice(0, 10);
     response.set({
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="phosphene-backup-${stamp}.zip"`,
-      "Content-Length": String(archive.byteLength),
       "Cache-Control": "no-store"
     });
-    response.send(archive);
+    try {
+      await streamBackup(response);
+    } catch (error) {
+      if (response.headersSent) {
+        response.destroy(error instanceof Error ? error : undefined);
+        return;
+      }
+      throw error;
+    }
   })
 );
 
@@ -272,11 +291,16 @@ router.post(
   "/backup/restore",
   backupUpload.single("backup"),
   asyncRoute(async (request, response) => {
-    const password = z.string().min(1).max(256).parse(request.body.password);
     if (!request.file) throw new AppError(400, "backup_required", "Select a backup file");
-    await verifyPassword(password);
-    await restoreBackup(request.file.buffer);
-    response.json({ ok: true, data: { restored: true, login_required: false } });
+    const uploadPath = path.resolve(request.file.path);
+    try {
+      const password = z.string().min(1).max(256).parse(request.body.password);
+      await verifyPassword(password);
+      await restoreBackupFromFile(uploadPath);
+      response.json({ ok: true, data: { restored: true, login_required: false } });
+    } finally {
+      await fs.rm(uploadPath, { force: true });
+    }
   })
 );
 

@@ -223,10 +223,52 @@ async function currentBalance(tx: Db): Promise<number> {
   return Number(row?.value ?? 0);
 }
 
-async function applyPenalty(tx: Db, task: any, actor: Actor, reason: string): Promise<number> {
+async function aiPenaltyUsedOnDate(tx: Db, date: string, timezone: string): Promise<number> {
+  const from = localDateTime(date, "00:00", timezone);
+  const to = localDateTime(addCalendarDays(date, 1), "00:00", timezone);
+  const rows = await tx
+    .select({ action: auditLogs.action, metadata: auditLogs.metadata })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.actor, "AI"),
+        inArray(auditLogs.action, ["points.penalty", "task.penalized"]),
+        gte(auditLogs.createdAt, from),
+        lt(auditLogs.createdAt, to)
+      )
+    );
+  return rows.reduce((sum: number, row: any) => {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const value =
+      row.action === "task.penalized"
+        ? Number(metadata.actual ?? 0)
+        : Math.max(0, -Number(metadata.amount ?? 0));
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+}
+
+async function applyPenalty(
+  tx: Db,
+  task: any,
+  actor: Actor,
+  reason: string,
+  now = new Date()
+): Promise<number> {
   const requested = Math.ceil(rewardForTask(task) * 0.5);
   const balance = await currentBalance(tx);
-  const actual = Math.min(requested, Math.max(0, balance));
+  const settings = await getSettings(tx);
+  const penaltyDate = localDate(now, settings.timezone);
+  let availableByBoundary = requested;
+  if (actor === "AI") {
+    assertState(
+      !settings.punishmentsPaused,
+      "punishments_paused",
+      "Task failure penalties are paused by the user"
+    );
+    const usedToday = await aiPenaltyUsedOnDate(tx, penaltyDate, settings.timezone);
+    availableByBoundary = Math.max(0, settings.dailyPenaltyLimit - usedToday);
+  }
+  const actual = Math.min(requested, Math.max(0, balance), availableByBoundary);
   if (actual > 0) {
     await addLedger(tx, {
       type: "task_penalty",
@@ -234,13 +276,14 @@ async function applyPenalty(tx: Db, task: any, actor: Actor, reason: string): Pr
       key: `task-penalty:${task.id}`,
       reason,
       taskId: task.id,
-      effectiveDate: task.occurrenceDate ?? undefined
+      effectiveDate: task.occurrenceDate ?? penaltyDate
     });
   }
   await audit(tx, actor, "task.penalized", "task", task.id, `Task penalty: -${actual}`, {
     requested,
     actual,
-    reason
+    reason,
+    dailyLimit: actor === "AI" ? settings.dailyPenaltyLimit : null
   });
   return actual;
 }
@@ -413,7 +456,7 @@ async function reconcileInTransaction(tx: Db, now = new Date()) {
       .update(tasks)
       .set({ status: "expired", expiredAt: now, failureReason: "Deadline passed", updatedAt: now })
       .where(eq(tasks.id, task.id));
-    await applyPenalty(tx, task, "system", "Task expired");
+    await applyPenalty(tx, task, "system", "Task expired", now);
   }
   if (generated || overdue.length) {
     await audit(tx, "system", "system.reconciled", "system", null, "Recurring tasks and deadlines reconciled", {
@@ -667,7 +710,7 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
             .where(and(eq(taskSubmissions.taskId, task.id), eq(taskSubmissions.status, "pending")));
         }
         let penalty = 0;
-        if (input.action === "fail") penalty = await applyPenalty(tx, task, actor, input.reason);
+        if (input.action === "fail") penalty = await applyPenalty(tx, task, actor, input.reason, now);
         if (input.scope === "this_and_future" && task.seriesId) {
           await tx.update(taskSeries).set({ active: false, updatedAt: now }).where(eq(taskSeries.id, task.seriesId));
           await tx
@@ -984,17 +1027,15 @@ export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI"
   return getDb().transaction(async (tx: Db) =>
     idempotent(tx, "adjust_points", input.idempotency_key, async () => {
       const settings = await getSettings(tx);
-      const today = localDate(new Date(), settings.timezone);
+      const now = new Date();
+      const today = localDate(now, settings.timezone);
       const balanceBefore = await currentBalance(tx);
       let amount = input.amount;
       let type: "manual_bonus" | "manual_penalty" | "correction" = "manual_bonus";
       if (input.kind === "penalty") {
         assertState(!settings.punishmentsPaused, "punishments_paused", "Point penalties are paused by the user");
-        const [{ value: usedToday }] = await tx
-          .select({ value: sql<number>`coalesce(sum(-${pointLedger.amount}), 0)` })
-          .from(pointLedger)
-          .where(and(eq(pointLedger.type, "manual_penalty"), eq(pointLedger.effectiveDate, today)));
-        const remaining = Math.max(0, settings.dailyPenaltyLimit - Number(usedToday ?? 0));
+        const usedToday = await aiPenaltyUsedOnDate(tx, today, settings.timezone);
+        const remaining = Math.max(0, settings.dailyPenaltyLimit - usedToday);
         assertState(remaining > 0, "daily_penalty_limit", "The user's daily penalty limit has been reached");
         amount = -Math.min(input.amount, remaining, Math.max(0, balanceBefore));
         type = "manual_penalty";

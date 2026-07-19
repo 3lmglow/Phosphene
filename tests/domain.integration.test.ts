@@ -1,10 +1,23 @@
+import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { finished } from "node:stream/promises";
+import { ZipArchive, type ZipEntryData } from "archiver";
 import { eq } from "drizzle-orm";
+import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { openPromise } from "yauzl";
+import { config } from "../src/server/config";
 import { initializeDatabase, getDb, shutdownDatabase } from "../src/server/db/client";
 import { seedDatabase } from "../src/server/db/seed";
-import { appSettings, pointLedger, rewardItems, tasks, userAccount } from "../src/server/db/schema";
+import {
+  appSettings,
+  pointLedger,
+  proofAssets,
+  rewardItems,
+  tasks,
+  userAccount
+} from "../src/server/db/schema";
 import { addCalendarDays, localDate } from "../src/server/lib/dates";
 import { createId } from "../src/server/lib/ids";
 import { setupApplication } from "../src/server/services/auth";
@@ -21,12 +34,71 @@ import {
   submitTask,
   updateUserSettings
 } from "../src/server/services/domain";
-import { exportBackup, restoreBackup } from "../src/server/services/backup";
+import {
+  beginApplicationRequest,
+  exportBackupToFile,
+  getActiveBackupOperation,
+  restoreBackupFromFile
+} from "../src/server/services/backup";
+import {
+  getObject,
+  getObjectPath,
+  initializeStorage,
+  isValidProofObjectKey,
+  saveProofImages
+} from "../src/server/services/storage";
+
+async function readBackupManifest(filePath: string): Promise<Record<string, any>> {
+  const zip = await openPromise(filePath, {
+    autoClose: true,
+    lazyEntries: true,
+    strictFileNames: true,
+    validateEntrySizes: true
+  });
+  try {
+    for await (const entry of zip.eachEntry()) {
+      if (entry.fileName !== "phosphene-backup.json") {
+        throw new Error("Backup manifest is not the first entry");
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of await zip.openReadStreamPromise(entry)) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    }
+    throw new Error("Backup manifest is missing");
+  } finally {
+    if (zip.isOpen) zip.close();
+  }
+}
+
+async function writeLegacyBackup(
+  filePath: string,
+  manifest: Record<string, any>,
+  assets: Array<{ objectKey: string; previewKey: string }>
+): Promise<void> {
+  const output = createWriteStream(filePath, { flags: "wx" });
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  archive.pipe(output);
+  const archiveDone = finished(archive);
+  const outputDone = finished(output);
+  archive.once("warning", (error) => archive.emit("error", error));
+  archive.append(JSON.stringify(manifest), { name: "phosphene-backup.json" });
+  for (const asset of assets) {
+    for (const key of [asset.objectKey, asset.previewKey]) {
+      const entry: ZipEntryData = { name: `objects/${key}`, store: true };
+      archive.file(getObjectPath(key), entry);
+    }
+  }
+  await archive.finalize();
+  await Promise.all([archiveDone, outputDone]);
+}
 
 describe.sequential("Phosphene domain integration", () => {
   const timezone = "Asia/Shanghai";
   const today = localDate(new Date(), timezone);
   let dailyTaskId = "";
+  let legacyImageTaskId = "";
 
   beforeAll(async () => {
     const databasePath = path.resolve(".data/test.sqlite");
@@ -35,7 +107,9 @@ describe.sequential("Phosphene domain integration", () => {
         fs.rm(`${databasePath}${suffix}`, { force: true })
       )
     );
+    await fs.rm(path.resolve(".data/test-uploads"), { recursive: true, force: true });
     await initializeDatabase();
+    await initializeStorage();
     await seedDatabase();
   });
 
@@ -228,6 +302,7 @@ describe.sequential("Phosphene domain integration", () => {
     expect(legacy.kind).toBe("task");
     if (legacy.kind !== "task") throw new Error("Expected legacy one-time task");
     expect(legacy.task.proofRequirement).toBe("image");
+    legacyImageTaskId = legacy.task.id;
   });
 
   it("rejects new tasks whose deadline has already passed", async () => {
@@ -312,17 +387,228 @@ describe.sequential("Phosphene domain integration", () => {
     ).rejects.toMatchObject({ code: "insufficient_points" });
   });
 
-  it("round-trips a versioned application backup without replacing credentials", async () => {
-    const archive = await exportBackup();
+  it("applies the user pause and shared daily limit to AI task-failure penalties", async () => {
     await adjustPoints({
       kind: "bonus",
-      amount: 99,
-      reason: "Temporary post-backup mutation",
-      idempotency_key: "integration-post-backup-bonus"
+      amount: 20,
+      reason: "Boundary test balance",
+      idempotency_key: "integration-boundary-balance"
     });
-    expect((await getOverview()).statistics.balance).toBe(99);
-    await restoreBackup(archive);
-    expect((await getOverview()).statistics.balance).toBe(0);
+    await updateUserSettings({
+      timezone,
+      user_label: "User",
+      ai_label: "星沉",
+      allowed_content: [],
+      prohibited_content: [],
+      punishment_intensity: 5,
+      daily_penalty_limit: 10,
+      punishments_paused: true,
+      boundary_notes: ""
+    });
+    const pausedTask = await createTask({
+      title: "Paused failure task",
+      description: "",
+      type: "daily",
+      difficulty: "easy",
+      base_points: 20,
+      verification_mode: "self",
+      proof_requirement: "none",
+      recurrence: "once",
+      daily_deadline_time: "23:59",
+      reveal_mode: "immediate",
+      idempotency_key: "integration-paused-failure-task"
+    });
+    if (pausedTask.kind !== "task") throw new Error("Expected one-time task");
+    const failInput = {
+      action: "fail" as const,
+      task_id: pausedTask.task.id,
+      scope: "occurrence" as const,
+      reason: "Boundary test failure",
+      idempotency_key: "integration-paused-failure"
+    };
+    await expect(manageTask(failInput)).rejects.toMatchObject({ code: "punishments_paused" });
+    expect(
+      (await queryTasks({
+        task_id: pausedTask.task.id,
+        include_proof: false,
+        limit: 1
+      })).items[0]?.status
+    ).toBe("pending");
+
+    await updateUserSettings({
+      timezone,
+      user_label: "User",
+      ai_label: "星沉",
+      allowed_content: [],
+      prohibited_content: [],
+      punishment_intensity: 5,
+      daily_penalty_limit: 10,
+      punishments_paused: false,
+      boundary_notes: ""
+    });
+    const manual = await adjustPoints({
+      kind: "penalty",
+      amount: 3,
+      reason: "Uses part of the shared daily limit",
+      idempotency_key: "integration-shared-limit-manual"
+    });
+    expect(manual.applied_amount).toBe(-3);
+    expect((await manageTask(failInput)).penalty).toBe(2);
+
+    const cappedTask = await createTask({
+      title: "Fully capped failure task",
+      description: "",
+      type: "daily",
+      difficulty: "easy",
+      base_points: 20,
+      verification_mode: "self",
+      proof_requirement: "none",
+      recurrence: "once",
+      daily_deadline_time: "23:59",
+      reveal_mode: "immediate",
+      idempotency_key: "integration-capped-failure-task"
+    });
+    if (cappedTask.kind !== "task") throw new Error("Expected one-time task");
+    const capped = await manageTask({
+      action: "fail",
+      task_id: cappedTask.task.id,
+      scope: "occurrence",
+      reason: "Daily limit already used",
+      idempotency_key: "integration-capped-failure"
+    });
+    expect(capped.penalty).toBe(0);
+    expect((await getOverview()).statistics.balance).toBe(15);
+  });
+
+  it("round-trips images and idempotency records through an in-place streamed backup", async () => {
+    const sourceImage = await sharp({
+      create: {
+        width: 48,
+        height: 32,
+        channels: 3,
+        background: { r: 72, g: 83, b: 128 }
+      }
+    })
+      .png()
+      .toBuffer();
+    const [stored] = await saveProofImages([
+      {
+        fieldname: "images",
+        originalname: "proof.png",
+        encoding: "7bit",
+        mimetype: "image/png",
+        size: sourceImage.byteLength,
+        buffer: sourceImage
+      } as Express.Multer.File
+    ]);
+    await submitTask(legacyImageTaskId, "Legacy image proof", [stored]);
+    const originalBefore = await getObject(stored.objectKey);
+    const balanceBeforeBackup = (await getOverview()).statistics.balance;
+    const backupPath = path.join(config.BACKUP_TEMP_PATH, "integration-backup.zip");
+    await fs.rm(backupPath, { force: true });
+    try {
+      await exportBackupToFile(backupPath);
+      expect((await fs.stat(backupPath)).size).toBeGreaterThan(0);
+      await adjustPoints({
+        kind: "bonus",
+        amount: 99,
+        reason: "Temporary post-backup mutation",
+        idempotency_key: "integration-post-backup-bonus"
+      });
+      expect((await getOverview()).statistics.balance).toBe(balanceBeforeBackup + 99);
+
+      await restoreBackupFromFile(backupPath);
+      expect((await getOverview()).statistics.balance).toBe(balanceBeforeBackup);
+      const restoredAsset = await getDb().query.proofAssets.findFirst({
+        where: eq(proofAssets.id, stored.id)
+      });
+      expect(restoredAsset).toBeDefined();
+      expect(restoredAsset?.objectKey).not.toBe(stored.objectKey);
+      expect((await getObject(restoredAsset!.objectKey)).equals(originalBefore)).toBe(true);
+
+      await adjustPoints({
+        kind: "bonus",
+        amount: 99,
+        reason: "Temporary post-backup mutation",
+        idempotency_key: "integration-post-backup-bonus"
+      });
+      expect((await getOverview()).statistics.balance).toBe(balanceBeforeBackup + 99);
+    } finally {
+      await fs.rm(backupPath, { force: true });
+    }
+  });
+
+  it("waits for active requests and blocks new work during backup maintenance", async () => {
+    const backupPath = path.join(config.BACKUP_TEMP_PATH, "integration-maintenance.zip");
+    await fs.rm(backupPath, { force: true });
+    const release = beginApplicationRequest();
+    let completed = false;
+    const exporting = exportBackupToFile(backupPath).then(() => {
+      completed = true;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(getActiveBackupOperation()).toBe("export");
+      expect(completed).toBe(false);
+      expect(() => beginApplicationRequest()).toThrowError(/temporarily unavailable/i);
+    } finally {
+      release();
+      await exporting;
+      await fs.rm(backupPath, { force: true });
+    }
+    expect(completed).toBe(true);
+    expect(getActiveBackupOperation()).toBeNull();
+  });
+
+  it("restores version 1 backups without retaining newer idempotency records", async () => {
+    const sourcePath = path.join(config.BACKUP_TEMP_PATH, "integration-v2-source.zip");
+    const legacyPath = path.join(config.BACKUP_TEMP_PATH, "integration-v1-compat.zip");
+    await Promise.all([
+      fs.rm(sourcePath, { force: true }),
+      fs.rm(legacyPath, { force: true })
+    ]);
+    try {
+      await exportBackupToFile(sourcePath);
+      const manifest = await readBackupManifest(sourcePath);
+      manifest.version = 1;
+      delete manifest.objects;
+      const assets = await getDb()
+        .select({
+          objectKey: proofAssets.objectKey,
+          previewKey: proofAssets.previewKey
+        })
+        .from(proofAssets);
+      await writeLegacyBackup(legacyPath, manifest, assets);
+      const balanceBeforeMutation = (await getOverview()).statistics.balance;
+      await adjustPoints({
+        kind: "bonus",
+        amount: 1,
+        reason: "Post-version-one-backup mutation",
+        idempotency_key: "integration-v1-post-backup"
+      });
+      await restoreBackupFromFile(legacyPath);
+      expect((await getOverview()).statistics.balance).toBe(balanceBeforeMutation);
+      await adjustPoints({
+        kind: "bonus",
+        amount: 1,
+        reason: "Post-version-one-backup mutation",
+        idempotency_key: "integration-v1-post-backup"
+      });
+      expect((await getOverview()).statistics.balance).toBe(balanceBeforeMutation + 1);
+      expect(await getDb().query.proofAssets.findFirst()).toBeDefined();
+    } finally {
+      await Promise.all([
+        fs.rm(sourcePath, { force: true }),
+        fs.rm(legacyPath, { force: true })
+      ]);
+    }
+  });
+
+  it("rejects proof object keys that could leave private storage", () => {
+    expect(isValidProofObjectKey("proofs/proof_safe/original.webp")).toBe(true);
+    expect(isValidProofObjectKey("../phosphene.sqlite")).toBe(false);
+    expect(isValidProofObjectKey("proofs/proof_safe/../../phosphene.sqlite")).toBe(false);
+    expect(() => getObjectPath("../phosphene.sqlite")).toThrowError(/invalid/i);
   });
 
   it("lets the first visitor claim an uninitialized instance exactly once", async () => {

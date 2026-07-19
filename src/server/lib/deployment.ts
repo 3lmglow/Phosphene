@@ -30,6 +30,7 @@ export function resolveDeployment(input: DeploymentInput) {
     cwd,
     input.localStoragePath || path.join(dataDir, "uploads")
   );
+  const backupTempPath = path.join(dataDir, "tmp");
 
   if (input.nodeEnv === "production") {
     if (sqlitePath === ":memory:") {
@@ -42,5 +43,11 @@ export function resolveDeployment(input: DeploymentInput) {
     }
   }
 
-  return { mode: "single" as const, dataDir, sqlitePath, localStoragePath };
+  return {
+    mode: "single" as const,
+    dataDir,
+    sqlitePath,
+    localStoragePath,
+    backupTempPath
+  };
 }

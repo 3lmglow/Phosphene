@@ -1495,7 +1495,7 @@ function DataSettings({
       setMessage("请选择备份并输入当前密码。");
       return;
     }
-    if (!confirm("恢复会替换当前任务、积分、兑换、历史和图片。建议先导出当前备份。确定继续吗？")) return;
+    if (!confirm("恢复会替换当前任务、积分、兑换、历史和图片，但保留当前密码与 AI Token。请先为 /data 创建快照并确认有足够临时空间。确定继续吗？")) return;
     setBusy(true);
     setMessage("");
     const form = new FormData();
@@ -1513,7 +1513,7 @@ function DataSettings({
   }
   return (
     <div className="settings-form">
-      <div className="settings-title"><div><h2>数据与备份</h2><p>导出包含数据库记录和经过净化的私有图片。恢复操作需要再次验证密码。</p></div></div>
+      <div className="settings-title"><div><h2>数据与备份</h2><p>导出包含业务记录、幂等记录和经过净化的私有图片。恢复需要再次验证密码。</p></div></div>
       <div className="install-card">
         <div className="install-card__icon"><Download /></div>
         <div>
@@ -1534,11 +1534,11 @@ function DataSettings({
         {installed && <span className="install-card__status"><Check /> 已安装</span>}
       </div>
       <div className="data-action">
-        <div><Upload /><div><strong>导出完整备份</strong><span>下载一个可恢复的 .zip 文件</span></div></div>
+        <div><Upload /><div><strong>导出完整备份</strong><span>以数据一致性快照下载可恢复的 .zip</span></div></div>
         <a className="button button--secondary" href="/api/backup/export" download>开始导出</a>
       </div>
       <div className="data-action data-action--warning">
-        <div><RotateCw /><div><strong>从备份恢复</strong><span>会替换当前任务、积分和图片数据</span></div></div>
+        <div><RotateCw /><div><strong>从备份恢复</strong><span>替换业务数据；密码、会话与 AI Token 保持不变</span></div></div>
         <label className="button button--ghost">{file ? file.name : "选择备份"}<input hidden type="file" accept=".zip,application/zip" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
       </div>
       {file && (
@@ -1552,7 +1552,7 @@ function DataSettings({
         </div>
       )}
       {message && <div className="notice-banner">{message}</div>}
-      <p className="security-note"><ShieldCheck size={15} /> 建议定期下载完整备份，并为 Zeabur 的 /data 持久卷创建快照。</p>
+      <p className="security-note"><ShieldCheck size={15} /> 仅恢复自己导出的 ZIP；操作前为 /data 创建快照，并为 ZIP、旧图片和新图片预留空间。</p>
     </div>
   );
 }
