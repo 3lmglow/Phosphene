@@ -1,26 +1,120 @@
 # Phosphene MCP 使用说明
 
-## 连接
+## 服务入口
 
-- Transport：Streamable HTTP
-- Endpoint：`https://YOUR_DOMAIN/mcp`
-- 自定义 Header name / Key：`Authorization`
-- 自定义 Header value：`Bearer phosphene_ai_你的完整Token`
-- Token 在首次设置或网站“设置 → AI 连接”中生成，只显示一次
+Phosphene 使用无状态 Streamable HTTP，所有七个工具都位于：
 
-`Bearer`、一个空格和完整 Token 都属于 Header value。若 AI 后端把 URL 与 Token
-分别保存为环境变量，推荐使用：
+```text
+https://YOUR_DOMAIN/mcp
+```
+
+同一个 Endpoint 接受初始化与后续工具请求。服务端不需要 MCP Session ID，客户端也不应
+另外添加 `/sse`、`/mcp-extra` 或工具专属路径。默认鉴权模式始终是 `token`，升级不会改变
+既有连接。
+
+## 静态 Token
+
+Token 在首次设置或网站“设置 → AI 连接”中生成，只显示一次。以下两种请求头任选一个：
+
+```http
+Authorization: Bearer phosphene_ai_你的完整Token
+```
+
+```http
+X-Phosphene-MCP-Token: phosphene_ai_你的完整Token
+```
+
+如果同时发送，两个 Token 必须一致。服务器日志会清除这两个 Header；Token 仍然不能进入
+URL、浏览器前端变量、公开仓库或截图。
+
+调用方推荐保存：
 
 ```env
 PHOSPHENE_MCP_URL=https://YOUR_DOMAIN/mcp
 PHOSPHENE_MCP_TOKEN=phosphene_ai_你的完整Token
 ```
 
-后端请求时组成 `Authorization: Bearer ${PHOSPHENE_MCP_TOKEN}`；Token 变量本身不要
-重复添加 `Bearer `。这些配置属于调用方 AI 客户端或 AI 后端，不是 Phosphene 服务端
-环境变量。不要把 Token 放进 URL、浏览器前端变量、公开仓库或日志。
+再由调用方拼接 `Authorization: Bearer ${PHOSPHENE_MCP_TOKEN}`。这些不是 Phosphene
+服务端环境变量。
 
-Phosphene 使用无状态 Streamable HTTP；同一个 Endpoint 同时接受 MCP 初始化和后续工具请求。
+## stdio 转接
+
+`dist/server/stdio-bridge.js` 是本地传输适配器。它对桌面客户端暴露 stdio，对 Phosphene
+服务仍使用上述 Streamable HTTP，因此权限、审计、Token 轮换和数据源均保持一致。
+
+构建仓库后使用：
+
+```json
+{
+  "mcpServers": {
+    "phosphene": {
+      "command": "node",
+      "args": ["/absolute/path/to/Phosphene/dist/server/stdio-bridge.js"],
+      "env": {
+        "PHOSPHENE_MCP_URL": "https://YOUR_DOMAIN/mcp",
+        "PHOSPHENE_MCP_TOKEN": "phosphene_ai_你的完整Token"
+      }
+    }
+  }
+}
+```
+
+转接器会透传工具 JSON Schema、文字结果、结构化结果和图片内容。URL 只有 origin 时自动
+补 `/mcp`；出于泄漏风险，含用户名、密码、查询参数或 fragment 的 URL 会被拒绝。
+
+## 可选免鉴权
+
+仅当调用方与 Phosphene 同机或位于隔离的可信网络，而且客户端无法添加任何 Header 时，
+在 Phosphene 服务端设置：
+
+```env
+PHOSPHENE_MCP_AUTH_MODE=none
+```
+
+该值需要重启进程才会生效。默认值 `token` 不变；切回 `token` 后之前未撤销的 AI Token
+继续有效。公网实例、可被他人访问的局域网和浏览器 JavaScript 均不应使用 `none`。
+
+## 客户端速查
+
+### Claude Code
+
+```bash
+claude mcp add --transport http phosphene https://YOUR_DOMAIN/mcp \
+  --header "Authorization: Bearer YOUR_AI_TOKEN"
+```
+
+### 自建 AI 后端
+
+使用服务端环境变量保存 URL 与原始 Token，请求时添加任一受支持 Header。不要在浏览器
+bundle 中注入凭证，也不要为跨域浏览器直连打开宽泛 CORS。
+
+### Operit / Android 本地桥
+
+- 同机 URL 使用 `http://127.0.0.1:PORT/mcp`
+- transport 选择 Streamable HTTP
+- 能发送 Header 就保留 `token`
+- 完全不能发送 Header 时，只在同机回环使用 `none`
+- 远程 Zeabur URL 必须使用 HTTPS 与 Token
+
+### Claude.ai 与 Claude 手机端
+
+Phosphene 尚未实现 OAuth 2.1 授权服务器，因此不把静态 Token 模式描述成 Claude.ai
+远程连接器兼容。将公网服务改为 `none` 虽可能绕过认证步骤，却会同时取消全部 MCP 访问
+控制，不属于安全方案。
+
+## 握手排错
+
+| 现象 | 检查项 |
+| --- | --- |
+| `401 ai_token_required` | Header 名是否正确，Bearer 后是否有一个空格 |
+| `401 invalid_ai_token` | Token 是否复制完整、已轮换或撤销 |
+| `401 conflicting_ai_token` | 不要同时发送不同的 Authorization 与专用 Header |
+| 没有工具 | URL 是否以 `/mcp` 结尾，客户端是否真的使用 Streamable HTTP |
+| stdio 启动即退出 | 本机是否已构建，以及两个 `PHOSPHENE_MCP_*` 调用方变量是否存在 |
+| 安卓客户端一直等待 | 改用 `127.0.0.1`，核对端口和 transport；旧 SSE-only 客户端需升级 |
+
+GET `/mcp` 返回 405 是无状态 Streamable HTTP Endpoint 的正常行为；实际 MCP 消息通过
+POST 发送。健康检查应访问 `/healthz`，不要用浏览器直接打开 `/mcp` 判断是否可用。
 
 ## 推荐系统提示
 

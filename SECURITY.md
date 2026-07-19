@@ -1,8 +1,8 @@
 # Security
 
 Phosphene is designed for one private user and one AI connection per deployment. The supported
-default production topology stores the PGlite database and private proof images on one persistent
-`/data` volume. The optional distributed topology uses private PostgreSQL and S3/MinIO services.
+production topology stores the SQLite database and private proof images on one persistent `/data`
+volume.
 
 ## Supported version
 
@@ -26,9 +26,11 @@ real Phosphene data from the report.
 - Mount a private persistent volume at `/data`; do not use an ephemeral directory.
 - Keep the Phosphene website behind HTTPS.
 - Do not expose the contents of `/data` through a static file server.
-- If using distributed mode, keep PostgreSQL and MinIO/S3 on private networking and use unique
-  database and object-storage credentials.
+- Keep `PHOSPHENE_MCP_AUTH_MODE=token` on every public deployment. The `none` mode is only for an
+  isolated private network or same-device loopback connection.
 - Rotate the AI token immediately if it is copied into an untrusted client.
+- Never place an AI token in the MCP URL, browser-side JavaScript, logs, screenshots, or a public
+  repository. Use `Authorization: Bearer` or `X-Phosphene-MCP-Token` from a trusted client.
 - Export a Phosphene ZIP and enable persistent-volume snapshots before upgrading.
 - Treat deleting the service volume as a destructive operation: it contains both the database and
   proof images.

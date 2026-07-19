@@ -6,6 +6,7 @@ import { getDb } from "../db/client";
 import { aiTokens, appSettings, auditLogs, sessions, userAccount } from "../db/schema";
 import { AppError, assertFound, assertState } from "../errors";
 import { createId, createSecret, tokenHash } from "../lib/ids";
+import { readMcpToken } from "../lib/mcp-connection";
 import { acceptsSetupToken } from "../lib/setup-access";
 
 const SESSION_COOKIE = "phosphene_session";
@@ -154,11 +155,34 @@ export function requireCsrf(request: Request, _response: Response, next: NextFun
 
 export async function requireAi(request: Request, _response: Response, next: NextFunction) {
   try {
-    const authorization = request.get("authorization");
-    if (!authorization?.startsWith("Bearer ")) throw new AppError(401, "ai_token_required", "AI bearer token is required");
-    const raw = authorization.slice(7);
+    if (config.PHOSPHENE_MCP_AUTH_MODE === "none") {
+      request.phospheneActor = "AI";
+      next();
+      return;
+    }
+    const credential = readMcpToken(
+      request.get("authorization"),
+      request.get("x-phosphene-mcp-token")
+    );
+    if (credential.conflicting) {
+      throw new AppError(
+        401,
+        "conflicting_ai_token",
+        "Authorization and X-Phosphene-MCP-Token contain different tokens"
+      );
+    }
+    if (!credential.token) {
+      throw new AppError(
+        401,
+        "ai_token_required",
+        "AI token is required in Authorization or X-Phosphene-MCP-Token"
+      );
+    }
     const token = await getDb().query.aiTokens.findFirst({
-      where: and(eq(aiTokens.tokenHash, tokenHash(raw)), isNull(aiTokens.revokedAt))
+      where: and(
+        eq(aiTokens.tokenHash, tokenHash(credential.token)),
+        isNull(aiTokens.revokedAt)
+      )
     });
     if (!token) throw new AppError(401, "invalid_ai_token", "AI token is invalid or revoked");
     await getDb().update(aiTokens).set({ lastUsedAt: new Date() }).where(eq(aiTokens.id, token.id));

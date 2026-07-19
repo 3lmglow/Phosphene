@@ -19,6 +19,7 @@ const logger = pino({
   redact: {
     paths: [
       "req.headers.authorization",
+      "req.headers['x-phosphene-mcp-token']",
       "req.headers.cookie",
       "res.headers['set-cookie']",
       "response.headers['set-cookie']"
@@ -122,6 +123,11 @@ if (!publicSettings.initialized) {
       : "Phosphene is awaiting first-visitor setup. Initialize it before sharing the URL."
   );
 }
+if (config.PHOSPHENE_MCP_AUTH_MODE === "none") {
+  logger.warn(
+    "MCP authentication is disabled. Keep /mcp on a trusted private network or protect it at the reverse proxy."
+  );
+}
 
 const server = app.listen(config.PORT, () => {
   const memory = process.memoryUsage();
@@ -130,6 +136,7 @@ const server = app.listen(config.PORT, () => {
       port: config.PORT,
       url: config.PUBLIC_URL,
       deploymentMode: config.DEPLOYMENT_MODE,
+      mcpAuthMode: config.PHOSPHENE_MCP_AUTH_MODE,
       memoryRssMb: Math.round(memory.rss / 1024 / 1024),
       memoryExternalMb: Math.round(memory.external / 1024 / 1024),
       dataDir: config.PHOSPHENE_DATA_DIR

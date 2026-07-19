@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { resolveDeployment } from "./lib/deployment";
+import { MCP_AUTH_MODES } from "./lib/mcp-connection";
 
 try {
   process.loadEnvFile?.(".env");
@@ -21,6 +22,10 @@ const configSchema = z.object({
   PUBLIC_URL: optionalUrl,
   ZEABUR_WEB_URL: optionalUrl,
   PHOSPHENE_SETUP_TOKEN: optionalString,
+  PHOSPHENE_MCP_AUTH_MODE: z.preprocess(
+    blankToUndefined,
+    z.enum(MCP_AUTH_MODES).default("token")
+  ),
   PHOSPHENE_TIMEZONE: z.string().default("Asia/Shanghai"),
   PHOSPHENE_DATA_DIR: optionalString,
   LOG_LEVEL: z.string().default("info"),

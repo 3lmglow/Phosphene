@@ -77,5 +77,13 @@ assert(
   compose.services.app.environment.PHOSPHENE_SETUP_TOKEN.includes(":-"),
   "Compose must allow first-visitor setup when the optional Setup Token is omitted"
 );
+assert(
+  compose.services.app.environment.PHOSPHENE_MCP_AUTH_MODE.includes("token"),
+  "Compose must keep token authentication as the default"
+);
+assert(
+  app.spec.env.PHOSPHENE_MCP_AUTH_MODE.default === "token",
+  "Zeabur must keep token authentication as the default"
+);
 
 console.log("Single-service SQLite deployment manifests are valid.");

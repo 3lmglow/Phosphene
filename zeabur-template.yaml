@@ -52,6 +52,8 @@ spec:
             default: https://${PUBLIC_DOMAIN}
           PHOSPHENE_SETUP_TOKEN:
             default: ${PHOSPHENE_SETUP_TOKEN}
+          PHOSPHENE_MCP_AUTH_MODE:
+            default: token
           PHOSPHENE_TIMEZONE:
             default: ${PHOSPHENE_TIMEZONE}
         instructions:

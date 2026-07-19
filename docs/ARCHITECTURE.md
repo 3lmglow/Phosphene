@@ -40,14 +40,21 @@ self 任务提交后立即完成。ai_review 先写 submission 和 `submitted_at
 
 ## MCP 边界
 
-同一 Express 服务在 `/mcp` 提供无状态 Streamable HTTP MCP。AI 使用 Bearer Token；服务端只保存 Token 的 SHA-256 哈希。
+同一 Express 服务在 `/mcp` 提供无状态 Streamable HTTP MCP。默认使用静态 AI Token，
+同时接受标准 `Authorization: Bearer` 与 `X-Phosphene-MCP-Token`；服务端只保存 Token 的
+SHA-256 哈希。`PHOSPHENE_MCP_AUTH_MODE=none` 只作为同机/可信内网兼容开关，公网部署
+保持默认 `token`。
+
+只支持 stdio 的客户端可运行本地 `stdio-bridge`，由它把工具列表、调用与图片结果转发到
+原 `/mcp`。桥接器不接触数据库，也不构成第二种生产拓扑。OAuth 授权服务器不在 1.0
+边界内；不会用不完整实现替代现有 Token 鉴权。
 
 AI 工具固定为 7 个，user 的提交、上传、设置和兑换保持在受会话及 CSRF 保护的网站 REST API 内。每项写操作都要求可复用的幂等键，以便客户端安全重试。
 
 ## 安全
 
 - user：HttpOnly/SameSite Cookie + 独立 CSRF Cookie/Header
-- AI：Bearer Token，数据库只保存 SHA-256
+- AI：默认静态 Token（Bearer 或专用 Header），数据库只保存 SHA-256
 - 密码：Argon2id
 - 写入口：Zod 校验、速率限制、审计日志
 - 上传：Multer 内存限额 → Sharp 真格式/像素校验 → 重新编码 → 私有存储

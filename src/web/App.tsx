@@ -1448,7 +1448,7 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
       <div className="connection-card">
         <span>MCP ENDPOINT</span>
         <SecretBox value={`${location.origin}/mcp`} />
-        <p>认证方式：<code>Authorization: Bearer YOUR_AI_TOKEN</code></p>
+        <p>认证方式：<code>Authorization: Bearer YOUR_AI_TOKEN</code>（推荐），也支持 <code>X-Phosphene-MCP-Token: YOUR_AI_TOKEN</code></p>
       </div>
       {secret && <div className="one-time-secret"><strong>新的 Token 只显示这一次</strong><SecretBox value={secret} /></div>}
       <div className="token-list">
