@@ -83,7 +83,7 @@ export const appSettings = sqliteTable(
     ),
     check(
       "app_settings_punishment_intensity_check",
-      sql`${table.punishmentIntensity} between 0 and 3`
+      sql`${table.punishmentIntensity} between 0 and 5`
     ),
     check(
       "app_settings_daily_penalty_limit_check",

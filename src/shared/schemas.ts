@@ -12,7 +12,10 @@ import {
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "必须使用 YYYY-MM-DD")
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)), "日期无效");
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+  }, "日期无效");
 const localTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "必须为 HH:mm");
 const timezone = z.string().min(1).max(80).refine((value) => {
   try {
@@ -81,7 +84,7 @@ export const taskQuerySchema = z.object({
   to: isoDate.optional(),
   include_proof: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(30),
-  cursor: z.string().optional()
+  cursor: z.string().datetime({ offset: true }).optional()
 });
 
 export const manageTaskSchema = z.discriminatedUnion("action", [

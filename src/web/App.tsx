@@ -33,7 +33,6 @@ import {
   Store,
   TicketCheck,
   TimerReset,
-  Trash2,
   Trophy,
   Upload,
   X
@@ -48,10 +47,10 @@ import {
   useRef,
   useState
 } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { SUPPORTED_TIMEZONES, TIMEZONE_OPTIONS } from "../shared/constants";
 import { presentRewardSnapshot } from "../shared/rewards";
-import { api, ApiError, idempotencyKey } from "./api";
+import { api, idempotencyKey } from "./api";
 
 type Bootstrap = {
   initialized: boolean;
@@ -733,7 +732,18 @@ function TaskCard({ task, aiLabel, onChanged }: { task: Task; aiLabel: string; o
   const [open, setOpen] = useState(false);
   return (
     <>
-      <article className={`task-card task-card--${task.type}`} onClick={() => setOpen(true)}>
+      <article
+        className={`task-card task-card--${task.type}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
         <div className="task-card__type">
           {task.type === "daily" ? <CalendarDays /> : task.type === "challenge" ? <Flame /> : <Gift />}
         </div>
@@ -1425,7 +1435,7 @@ function SettingsForm({ title, copy, children, onSave }: { title: string; copy: 
     <form className="settings-form" onSubmit={save}>
       <div className="settings-title"><div><h2>{title}</h2><p>{copy}</p></div>{message && <span>{message}</span>}</div>
       {children}
-      <button className="button button--primary"><Save size={17} />{busy ? "保存中…" : "保存更改"}</button>
+      <button className="button button--primary" disabled={busy}><Save size={17} />{busy ? "保存中…" : "保存更改"}</button>
     </form>
   );
 }
@@ -1433,13 +1443,17 @@ function SettingsForm({ title, copy, children, onSave }: { title: string; copy: 
 function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: () => void }) {
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   async function rotate() {
     if (!confirm("轮换后，所有旧 AI Token 会立即失效。继续吗？")) return;
     setBusy(true);
+    setError("");
     try {
       const result = await api<{ token: string }>("/ai-tokens/rotate", { method: "POST", body: { name: "Primary AI" } });
       setSecret(result.token);
       onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Token 轮换失败。");
     } finally { setBusy(false); }
   }
   return (
@@ -1450,6 +1464,7 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
         <SecretBox value={`${location.origin}/mcp`} />
         <p>认证方式：<code>Authorization: Bearer YOUR_AI_TOKEN</code>（推荐），也支持 <code>X-Phosphene-MCP-Token: YOUR_AI_TOKEN</code></p>
       </div>
+      {error && <InlineError message={error} />}
       {secret && <div className="one-time-secret"><strong>新的 Token 只显示这一次</strong><SecretBox value={secret} /></div>}
       <div className="token-list">
         {tokens.map((token) => (

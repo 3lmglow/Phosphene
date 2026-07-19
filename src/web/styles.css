@@ -2585,6 +2585,11 @@ body::before {
   box-shadow: 0 16px 42px rgba(31, 27, 57, 0.1);
 }
 
+.task-card:focus-visible {
+  outline: 3px solid rgba(117, 105, 168, 0.38);
+  outline-offset: 3px;
+}
+
 .task-card__type,
 .task-symbol {
   width: 46px;

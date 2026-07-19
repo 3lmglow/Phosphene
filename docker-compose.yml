@@ -13,7 +13,6 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       PHOSPHENE_SETUP_TOKEN: ${PHOSPHENE_SETUP_TOKEN:-}
       PHOSPHENE_MCP_AUTH_MODE: ${PHOSPHENE_MCP_AUTH_MODE:-token}
-      PHOSPHENE_TIMEZONE: ${PHOSPHENE_TIMEZONE:-Asia/Shanghai}
     volumes:
       - phosphene-data:/data
 

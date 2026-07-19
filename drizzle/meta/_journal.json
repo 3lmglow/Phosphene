@@ -8,6 +8,13 @@
       "when": 1784444814463,
       "tag": "0000_cheerful_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784466690393,
+      "tag": "0001_expand_punishment_intensity",
+      "breakpoints": true
     }
   ]
 }

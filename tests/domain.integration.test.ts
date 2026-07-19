@@ -18,7 +18,8 @@ import {
   queryTasks,
   reconcileSystem,
   redeemReward,
-  submitTask
+  submitTask,
+  updateUserSettings
 } from "../src/server/services/domain";
 import { exportBackup, restoreBackup } from "../src/server/services/backup";
 
@@ -229,6 +230,40 @@ describe.sequential("Phosphene domain integration", () => {
     expect(legacy.task.proofRequirement).toBe("image");
   });
 
+  it("rejects new tasks whose deadline has already passed", async () => {
+    await expect(
+      createTask({
+        title: "Already overdue",
+        description: "",
+        type: "challenge",
+        difficulty: "easy",
+        base_points: 3,
+        verification_mode: "self",
+        proof_requirement: "none",
+        recurrence: "once",
+        daily_deadline_time: "23:59",
+        deadline: new Date(Date.now() - 60_000).toISOString(),
+        reveal_mode: "immediate",
+        idempotency_key: "integration-past-deadline"
+      })
+    ).rejects.toMatchObject({ code: "deadline_in_past" });
+  });
+
+  it("persists the full documented punishment intensity range", async () => {
+    const updated = await updateUserSettings({
+      timezone,
+      user_label: "User",
+      ai_label: "星沉",
+      allowed_content: [],
+      prohibited_content: [],
+      punishment_intensity: 5,
+      daily_penalty_limit: 20,
+      punishments_paused: false,
+      boundary_notes: ""
+    });
+    expect(updated.punishment_intensity).toBe(5);
+  });
+
   it("caps a failed-task penalty at the available balance and is idempotent", async () => {
     const created = await createTask({
       title: "Penalty task",
@@ -257,6 +292,24 @@ describe.sequential("Phosphene domain integration", () => {
     expect(retry.penalty).toBe(failed.penalty);
     expect(failed.penalty).toBe(5);
     expect((await getOverview()).statistics.balance).toBe(0);
+  });
+
+  it("records a zero-balance penalty as a safe no-op and rejects a negative balance correction", async () => {
+    const penalty = await adjustPoints({
+      kind: "penalty",
+      amount: 5,
+      reason: "No balance available",
+      idempotency_key: "integration-zero-balance-penalty"
+    });
+    expect(penalty).toMatchObject({ entry: null, balance: 0, applied_amount: 0 });
+    await expect(
+      adjustPoints({
+        kind: "correction",
+        amount: -1,
+        reason: "Would make balance negative",
+        idempotency_key: "integration-negative-correction"
+      })
+    ).rejects.toMatchObject({ code: "insufficient_points" });
   });
 
   it("round-trips a versioned application backup without replacing credentials", async () => {

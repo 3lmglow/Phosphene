@@ -5,6 +5,7 @@ import {
   TIMEZONE_OPTIONS,
   streakBonusForDay
 } from "../src/shared/constants";
+import { createTaskSchema, taskQuerySchema } from "../src/shared/schemas";
 import { addCalendarDays, localDate, localDateTime } from "../src/server/lib/dates";
 import { resolveDeployment } from "../src/server/lib/deployment";
 
@@ -46,6 +47,25 @@ describe("timezone-safe calendar helpers", () => {
       "2026-07-19T15:30:00.000Z"
     );
     expect(addCalendarDays("2024-02-28", 1)).toBe("2024-02-29");
+  });
+
+  it("rejects calendar dates and cursors that only look valid", () => {
+    expect(() =>
+      createTaskSchema.parse({
+        title: "Impossible date",
+        type: "daily",
+        base_points: 1,
+        start_date: "2026-02-31",
+        idempotency_key: "invalid-calendar-date"
+      })
+    ).toThrow();
+    expect(() =>
+      taskQuerySchema.parse({
+        include_proof: false,
+        limit: 10,
+        cursor: "not-a-timestamp"
+      })
+    ).toThrow();
   });
 });
 

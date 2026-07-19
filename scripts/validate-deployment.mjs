@@ -39,6 +39,12 @@ for (const removed of ["@aws-sdk/client-s3", "@electric-sql/pglite", "pg"]) {
 }
 assert(configSource.includes("SQLITE_PATH"), "SQLite path configuration is missing");
 assert(!/DATABASE_URL|PGLITE|S3_|STORAGE_DRIVER/.test(configSource), "Legacy storage configuration remains");
+assert(
+  !configSource.includes("PHOSPHENE_TIMEZONE") &&
+    !JSON.stringify(zeabur).includes("PHOSPHENE_TIMEZONE") &&
+    !JSON.stringify(compose).includes("PHOSPHENE_TIMEZONE"),
+  "Timezone must be selected in the website instead of duplicated as a deployment variable"
+);
 assert(databaseSource.includes('PRAGMA journal_mode = WAL'), "SQLite WAL mode is not enabled");
 assert(databaseSource.includes('PRAGMA foreign_keys = ON'), "SQLite foreign keys are not enabled");
 assert(!/@electric-sql|node-postgres/.test(databaseSource), "Legacy database driver remains");

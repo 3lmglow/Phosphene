@@ -26,7 +26,6 @@ const configSchema = z.object({
     blankToUndefined,
     z.enum(MCP_AUTH_MODES).default("token")
   ),
-  PHOSPHENE_TIMEZONE: z.string().default("Asia/Shanghai"),
   PHOSPHENE_DATA_DIR: optionalString,
   LOG_LEVEL: z.string().default("info"),
   SQLITE_PATH: optionalString,

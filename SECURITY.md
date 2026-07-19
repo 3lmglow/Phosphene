@@ -32,5 +32,7 @@ real Phosphene data from the report.
 - Never place an AI token in the MCP URL, browser-side JavaScript, logs, screenshots, or a public
   repository. Use `Authorization: Bearer` or `X-Phosphene-MCP-Token` from a trusted client.
 - Export a Phosphene ZIP and enable persistent-volume snapshots before upgrading.
+- Until the documented ZIP restore issues are fixed, treat `/data` volume snapshots as the primary
+  disaster-recovery copy and restore only trusted, self-generated archives.
 - Treat deleting the service volume as a destructive operation: it contains both the database and
   proof images.

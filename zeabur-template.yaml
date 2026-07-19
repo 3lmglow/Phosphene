@@ -14,10 +14,6 @@ spec:
       type: STRING
       name: Optional setup protection
       description: Leave blank for first-visitor setup, or enter a long private value to protect claiming.
-    - key: PHOSPHENE_TIMEZONE
-      type: STRING
-      name: Timezone
-      description: IANA timezone used for daily streaks, for example Asia/Shanghai.
   tags:
     - Tool
     - AI
@@ -54,8 +50,6 @@ spec:
             default: ${PHOSPHENE_SETUP_TOKEN}
           PHOSPHENE_MCP_AUTH_MODE:
             default: token
-          PHOSPHENE_TIMEZONE:
-            default: ${PHOSPHENE_TIMEZONE}
         instructions:
           - type: DOMAIN
             title: Open Phosphene
@@ -75,7 +69,3 @@ spec:
           type: STRING
           name: 可选的首次设置保护
           description: 留空则由首位访问者认领；也可填写一段较长的私密字符串保护认领过程。
-        - key: PHOSPHENE_TIMEZONE
-          type: STRING
-          name: 时区
-          description: 连击按此自然日结算，例如 Asia/Shanghai。

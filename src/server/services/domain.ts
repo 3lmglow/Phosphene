@@ -470,6 +470,11 @@ export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
       }
 
       const now = new Date();
+      assertState(
+        !input.deadline || new Date(input.deadline) > now,
+        "deadline_in_past",
+        "A new task deadline must be in the future"
+      );
       const id = createId("task");
       const visibleAt =
         input.reveal_mode === "at_time"
@@ -573,6 +578,11 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
       const task = assertFound(await tx.query.tasks.findFirst({ where: eq(tasks.id, input.task_id) }), "Task not found");
       if (input.action === "edit") {
         assertState(task.status === "pending", "task_not_editable", "Only pending tasks can be edited");
+        assertState(
+          !input.deadline || new Date(input.deadline) > now,
+          "deadline_in_past",
+          "An edited task deadline must be in the future"
+        );
         const patch = {
           title: input.title ?? task.title,
           description: input.description ?? task.description,
@@ -975,6 +985,7 @@ export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI"
     idempotent(tx, "adjust_points", input.idempotency_key, async () => {
       const settings = await getSettings(tx);
       const today = localDate(new Date(), settings.timezone);
+      const balanceBefore = await currentBalance(tx);
       let amount = input.amount;
       let type: "manual_bonus" | "manual_penalty" | "correction" = "manual_bonus";
       if (input.kind === "penalty") {
@@ -985,10 +996,22 @@ export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI"
           .where(and(eq(pointLedger.type, "manual_penalty"), eq(pointLedger.effectiveDate, today)));
         const remaining = Math.max(0, settings.dailyPenaltyLimit - Number(usedToday ?? 0));
         assertState(remaining > 0, "daily_penalty_limit", "The user's daily penalty limit has been reached");
-        amount = -Math.min(input.amount, remaining, Math.max(0, await currentBalance(tx)));
+        amount = -Math.min(input.amount, remaining, Math.max(0, balanceBefore));
         type = "manual_penalty";
       } else if (input.kind === "correction") {
+        assertState(
+          balanceBefore + input.amount >= 0,
+          "insufficient_points",
+          "A correction cannot reduce the point balance below zero"
+        );
         type = "correction";
+      }
+      if (amount === 0) {
+        await audit(tx, actor, `points.${input.kind}`, "point_ledger", null, input.reason, {
+          requestedAmount: input.amount,
+          amount: 0
+        });
+        return { entry: null, balance: balanceBefore, applied_amount: 0 };
       }
       const entry = await addLedger(tx, {
         type,
@@ -1000,7 +1023,7 @@ export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI"
       });
       await audit(tx, actor, `points.${input.kind}`, "point_ledger", entry.id, input.reason, { amount });
       await recomputeActivityAndStats(tx);
-      return { entry, balance: await currentBalance(tx) };
+      return { entry, balance: await currentBalance(tx), applied_amount: amount };
     })
   );
 }

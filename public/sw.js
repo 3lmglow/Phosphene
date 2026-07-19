@@ -1,9 +1,8 @@
-const SHELL_CACHE = "phosphene-shell-v2";
-const RUNTIME_CACHE = "phosphene-runtime-v2";
+const SHELL_CACHE = "phosphene-shell-v3";
+const RUNTIME_CACHE = "phosphene-runtime-v3";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
-  "/favicon.svg",
   "/icons/phosphene-128.png",
   "/icons/phosphene-192.png",
   "/icons/phosphene-512.png",
