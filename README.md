@@ -84,17 +84,31 @@ docker compose up -d --build
 
 ## 连接 AI
 
-MCP 地址：
+连接信息可在网站“设置 → AI 连接”中查看。它们应填写在调用 Phosphene 的 AI
+客户端或 AI 后端中，不是填回 Phosphene 服务自己的环境变量。
 
-```text
-https://YOUR_PHOSPHENE_DOMAIN/mcp
+如果客户端提供 URL 和“自定义 Header”输入框，按下面填写：
+
+| 配置项 | 值 |
+| --- | --- |
+| URL / Endpoint | `https://YOUR_PHOSPHENE_DOMAIN/mcp` |
+| Header name / Key | `Authorization` |
+| Header value | `Bearer phosphene_ai_你的完整Token` |
+
+`Bearer`、它后面的一个空格以及完整 Token 都是 Header value 的一部分。不要把
+Token 拼进 URL。
+
+自建 AI 后端可以采用以下环境变量命名：
+
+```env
+PHOSPHENE_MCP_URL=https://YOUR_PHOSPHENE_DOMAIN/mcp
+PHOSPHENE_MCP_TOKEN=phosphene_ai_你的完整Token
 ```
 
-认证：
-
-```text
-Authorization: Bearer phosphene_ai_...
-```
+后端发送请求时再组成
+`Authorization: Bearer ${PHOSPHENE_MCP_TOKEN}`。`PHOSPHENE_MCP_TOKEN` 的值本身
+不要重复添加 `Bearer `。Yukehome 后端使用的正是这两个变量名，并且 URL 只填域名时
+也会自动补上 `/mcp`。
 
 通用 HTTP MCP 客户端配置示例：
 
@@ -112,7 +126,9 @@ Authorization: Bearer phosphene_ai_...
 }
 ```
 
-具体字段以客户端当前文档为准。工具说明见 [docs/MCP.md](docs/MCP.md)。
+不同客户端的外层字段可能不同，但 URL、Header name 和 Header value 不变。Token
+只能保存在可信的后端环境变量或本地私密客户端配置中，不能放进浏览器前端变量、公开
+仓库、日志或截图。工具说明见 [docs/MCP.md](docs/MCP.md)。
 
 ## 七个 MCP 工具
 

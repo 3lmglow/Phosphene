@@ -4,8 +4,21 @@
 
 - Transport：Streamable HTTP
 - Endpoint：`https://YOUR_DOMAIN/mcp`
-- Header：`Authorization: Bearer YOUR_AI_TOKEN`
+- 自定义 Header name / Key：`Authorization`
+- 自定义 Header value：`Bearer phosphene_ai_你的完整Token`
 - Token 在首次设置或网站“设置 → AI 连接”中生成，只显示一次
+
+`Bearer`、一个空格和完整 Token 都属于 Header value。若 AI 后端把 URL 与 Token
+分别保存为环境变量，推荐使用：
+
+```env
+PHOSPHENE_MCP_URL=https://YOUR_DOMAIN/mcp
+PHOSPHENE_MCP_TOKEN=phosphene_ai_你的完整Token
+```
+
+后端请求时组成 `Authorization: Bearer ${PHOSPHENE_MCP_TOKEN}`；Token 变量本身不要
+重复添加 `Bearer `。这些配置属于调用方 AI 客户端或 AI 后端，不是 Phosphene 服务端
+环境变量。不要把 Token 放进 URL、浏览器前端变量、公开仓库或日志。
 
 Phosphene 使用无状态 Streamable HTTP；同一个 Endpoint 同时接受 MCP 初始化和后续工具请求。
 
