@@ -112,7 +112,7 @@ function createMcpServer() {
 
   server.tool(
     "manage_task",
-    "Edit, cancel, fail, review, pause, or resume a task/series. Use an idempotency key for every write.",
+    "Edit, cancel, fail, review, pause, or resume a task/series. Rejecting a submission requires a useful reason. Pausing a recurring series immediately removes its pending current occurrence while preserving submitted or completed work. Use an idempotency key for every write.",
     {
       action: z.enum(["edit", "cancel", "fail", "review", "pause_series", "resume_series"]),
       task_id: z.string().optional(),
@@ -124,7 +124,7 @@ function createMcpServer() {
       base_points: z.number().int().optional(),
       deadline: z.string().optional(),
       decision: z.enum(["approve", "reject"]).optional(),
-      reason: z.string().optional(),
+      reason: z.string().optional().describe("Required for rejection; explain what the user should add or change."),
       idempotency_key: idempotencyKey()
     },
     async (args) => result(await manageTask(manageTaskSchema.parse(args), "AI"))

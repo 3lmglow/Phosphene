@@ -87,39 +87,49 @@ export const taskQuerySchema = z.object({
   cursor: z.string().datetime({ offset: true }).optional()
 });
 
-export const manageTaskSchema = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("edit"),
-    task_id: z.string(),
-    scope: z.enum(["occurrence", "this_and_future"]).default("occurrence"),
-    title: z.string().trim().min(1).max(120).optional(),
-    description: z.string().trim().max(4000).optional(),
-    difficulty: z.enum(TASK_DIFFICULTIES).optional(),
-    base_points: z.number().int().min(1).max(10000).optional(),
-    deadline: z.string().datetime({ offset: true }).optional(),
-    idempotency_key: z.string().min(8).max(128)
-  }),
-  z.object({
-    action: z.enum(["cancel", "fail"]),
-    task_id: z.string(),
-    scope: z.enum(["occurrence", "this_and_future"]).default("occurrence"),
-    reason: z.string().trim().min(1).max(1000),
-    idempotency_key: z.string().min(8).max(128)
-  }),
-  z.object({
-    action: z.literal("review"),
-    task_id: z.string(),
-    decision: z.enum(["approve", "reject"]),
-    reason: z.string().trim().max(1000).optional(),
-    idempotency_key: z.string().min(8).max(128)
-  }),
-  z.object({
-    action: z.enum(["pause_series", "resume_series"]),
-    series_id: z.string(),
-    reason: z.string().trim().max(1000).optional(),
-    idempotency_key: z.string().min(8).max(128)
-  })
-]);
+export const manageTaskSchema = z
+  .discriminatedUnion("action", [
+    z.object({
+      action: z.literal("edit"),
+      task_id: z.string(),
+      scope: z.enum(["occurrence", "this_and_future"]).default("occurrence"),
+      title: z.string().trim().min(1).max(120).optional(),
+      description: z.string().trim().max(4000).optional(),
+      difficulty: z.enum(TASK_DIFFICULTIES).optional(),
+      base_points: z.number().int().min(1).max(10000).optional(),
+      deadline: z.string().datetime({ offset: true }).optional(),
+      idempotency_key: z.string().min(8).max(128)
+    }),
+    z.object({
+      action: z.enum(["cancel", "fail"]),
+      task_id: z.string(),
+      scope: z.enum(["occurrence", "this_and_future"]).default("occurrence"),
+      reason: z.string().trim().min(1).max(1000),
+      idempotency_key: z.string().min(8).max(128)
+    }),
+    z.object({
+      action: z.literal("review"),
+      task_id: z.string(),
+      decision: z.enum(["approve", "reject"]),
+      reason: z.string().trim().max(1000).optional(),
+      idempotency_key: z.string().min(8).max(128)
+    }),
+    z.object({
+      action: z.enum(["pause_series", "resume_series"]),
+      series_id: z.string(),
+      reason: z.string().trim().max(1000).optional(),
+      idempotency_key: z.string().min(8).max(128)
+    })
+  ])
+  .superRefine((value, context) => {
+    if (value.action === "review" && value.decision === "reject" && !value.reason?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reason"],
+        message: "打回提交时必须说明理由，让 user 知道需要补充或修改什么"
+      });
+    }
+  });
 
 export const submitTaskSchema = z.object({
   proof_text: z.string().trim().max(4000).optional().default("")

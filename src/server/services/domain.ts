@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -60,6 +61,7 @@ import type { StoredProof } from "./storage";
 
 type Db = any;
 type Actor = "AI" | "user" | "system";
+const SERIES_PAUSED_TASK_REASON = "Recurring series was paused";
 
 function presentRedemption(row: any, aiLabel: string) {
   return {
@@ -605,16 +607,58 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
         );
         const active = input.action === "resume_series";
         const settings = await getSettings(tx);
+        const today = localDate(now, settings.timezone);
+        const resumeDate = compareDates(today, series.startDate) >= 0 ? today : series.startDate;
+        if (active) {
+          assertState(
+            !series.endDate || compareDates(resumeDate, series.endDate) <= 0,
+            "series_ended",
+            "This recurring task series has already ended"
+          );
+        }
         await tx
           .update(taskSeries)
           .set({
             active,
-            nextOccurrenceDate: active ? localDate(now, settings.timezone) : series.nextOccurrenceDate,
+            nextOccurrenceDate: active ? resumeDate : series.nextOccurrenceDate,
             updatedAt: now
           })
           .where(eq(taskSeries.id, series.id));
-        await audit(tx, actor, `task_series.${active ? "resumed" : "paused"}`, "task_series", series.id, input.reason ?? "");
-        return { series_id: series.id, active };
+        const affectedTasks = active
+          ? await tx
+              .update(tasks)
+              .set({ status: "pending", failureReason: null, updatedAt: now })
+              .where(
+                and(
+                  eq(tasks.seriesId, series.id),
+                  gte(tasks.occurrenceDate, resumeDate),
+                  eq(tasks.status, "cancelled"),
+                  eq(tasks.failureReason, SERIES_PAUSED_TASK_REASON),
+                  or(isNull(tasks.deadlineAt), gt(tasks.deadlineAt, now))
+                )
+              )
+              .returning({ id: tasks.id })
+          : await tx
+              .update(tasks)
+              .set({ status: "cancelled", failureReason: SERIES_PAUSED_TASK_REASON, updatedAt: now })
+              .where(
+                and(
+                  eq(tasks.seriesId, series.id),
+                  gte(tasks.occurrenceDate, today),
+                  eq(tasks.status, "pending")
+                )
+              )
+              .returning({ id: tasks.id });
+        await audit(
+          tx,
+          actor,
+          `task_series.${active ? "resumed" : "paused"}`,
+          "task_series",
+          series.id,
+          input.reason ?? (active ? "Recurring series resumed" : "Recurring series paused"),
+          { affectedTasks: affectedTasks.length }
+        );
+        return { series_id: series.id, active, affected_tasks: affectedTasks.length };
       }
 
       if (!("task_id" in input)) throw new AppError(400, "invalid_action", "Task action is invalid");
@@ -743,6 +787,11 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
         await recomputeActivityAndStats(tx);
         return { task_id: task.id, status: "completed", completion_date: completionDate };
       }
+      assertState(
+        Boolean(input.reason?.trim()),
+        "review_reason_required",
+        "A rejection reason is required so the user knows what to change"
+      );
       await tx
         .update(taskSubmissions)
         .set({ status: "rejected", reviewedAt: now, reviewReason: input.reason })

@@ -105,7 +105,7 @@ type Task = {
     proofText: string;
     status: string;
     submittedAt: string;
-    reviewReason?: string;
+    reviewReason?: string | null;
     assets: Array<{ id: string; width: number; height: number }>;
   }>;
 };
@@ -787,7 +787,15 @@ function TaskDialog({
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    void api<Task>(`/tasks/${taskId}`).then(setTask).catch(() => {});
+    void api<Task>(`/tasks/${taskId}`)
+      .then((detail) => {
+        setTask(detail);
+        const rejected = detail.submissions?.[0];
+        if (detail.status === "pending" && rejected?.status === "rejected") {
+          setProofText((current) => current || rejected.proofText);
+        }
+      })
+      .catch(() => {});
   }, [taskId]);
   async function submit() {
     setBusy(true);
@@ -806,6 +814,7 @@ function TaskDialog({
     }
   }
   const latest = task.submissions?.[0];
+  const rejectedSubmission = task.status === "pending" && latest?.status === "rejected" ? latest : null;
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog task-dialog" role="dialog" aria-modal="true" aria-label={task.title}>
@@ -828,43 +837,56 @@ function TaskDialog({
           <div><ShieldCheck /><span>确认方式</span><strong>{task.verificationMode === "self" ? "自己确认" : `${aiLabel} 确认`}</strong></div>
         </div>
         {task.status === "pending" && (
-          <div className="submission-box">
-            <div>
-              <h3>提交完成</h3>
-              <span>证据要求：{proofLabel(task.proofRequirement)}</span>
+          <>
+            {rejectedSubmission && (
+              <div className="state-message state-message--rejected">
+                <RotateCw />
+                <div>
+                  <strong>{aiLabel} 请你补充后再提交</strong>
+                  <span>
+                    打回理由：{rejectedSubmission.reviewReason?.trim() || `这次没有留下具体说明，请向 ${aiLabel} 确认后再提交。`}
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="submission-box">
+              <div>
+                <h3>{rejectedSubmission ? "重新提交" : "提交完成"}</h3>
+                <span>证据要求：{proofLabel(task.proofRequirement)}</span>
+              </div>
+              {error && <InlineError message={error} />}
+              {task.proofRequirement !== "none" && task.proofRequirement !== "image" && (
+                <textarea value={proofText} onChange={(event) => setProofText(event.target.value)} placeholder="写下完成情况、感受或相关记录…" rows={4} />
+              )}
+              {["image", "text_or_image", "text_and_image"].includes(task.proofRequirement) && (
+                <>
+                  <input
+                    hidden
+                    ref={fileRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 4))}
+                  />
+                  <button className="upload-zone" onClick={() => fileRef.current?.click()}>
+                    <ImagePlus />
+                    <strong>{files.length ? `已选择 ${files.length} 张图片` : "添加图片证据"}</strong>
+                    <span>JPEG、PNG 或 WebP · 最多 4 张 · 单张 10 MB</span>
+                  </button>
+                  {files.length > 0 && (
+                    <div className="file-chips">
+                      {files.map((file, index) => (
+                        <span key={`${file.name}-${index}`}>{file.name}<button onClick={() => setFiles(files.filter((_, item) => item !== index))}><X /></button></span>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              <button className="button button--primary button--wide" disabled={busy} onClick={submit}>
+                {busy ? "正在提交…" : task.verificationMode === "self" ? "确认完成" : `提交给 ${aiLabel} 确认`} <Check size={17} />
+              </button>
             </div>
-            {error && <InlineError message={error} />}
-            {task.proofRequirement !== "none" && task.proofRequirement !== "image" && (
-              <textarea value={proofText} onChange={(event) => setProofText(event.target.value)} placeholder="写下完成情况、感受或相关记录…" rows={4} />
-            )}
-            {["image", "text_or_image", "text_and_image"].includes(task.proofRequirement) && (
-              <>
-                <input
-                  hidden
-                  ref={fileRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  multiple
-                  onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 4))}
-                />
-                <button className="upload-zone" onClick={() => fileRef.current?.click()}>
-                  <ImagePlus />
-                  <strong>{files.length ? `已选择 ${files.length} 张图片` : "添加图片证据"}</strong>
-                  <span>JPEG、PNG 或 WebP · 最多 4 张 · 单张 10 MB</span>
-                </button>
-                {files.length > 0 && (
-                  <div className="file-chips">
-                    {files.map((file, index) => (
-                      <span key={`${file.name}-${index}`}>{file.name}<button onClick={() => setFiles(files.filter((_, item) => item !== index))}><X /></button></span>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-            <button className="button button--primary button--wide" disabled={busy} onClick={submit}>
-              {busy ? "正在提交…" : task.verificationMode === "self" ? "确认完成" : `提交给 ${aiLabel} 确认`} <Check size={17} />
-            </button>
-          </div>
+          </>
         )}
         {task.status === "submitted" && (
           <div className="state-message state-message--waiting">

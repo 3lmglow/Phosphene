@@ -1398,6 +1398,16 @@ svg {
 .state-message span { color: var(--ink-faint); font-size: 9px; }
 .state-message--waiting { color: #8a6938; background: #f7eedb; }
 .state-message--success { color: #53715c; background: #e9f2e8; }
+.state-message--rejected {
+  margin-bottom: 10px;
+  color: #884f56;
+  border: 1px solid rgba(176, 86, 96, 0.16);
+  background: #f8e9eb;
+}
+.state-message--rejected span {
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
 
 .proof-gallery {
   margin-top: 15px;

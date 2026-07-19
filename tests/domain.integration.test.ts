@@ -15,6 +15,7 @@ import {
   pointLedger,
   proofAssets,
   rewardItems,
+  taskSeries,
   tasks,
   userAccount
 } from "../src/server/db/schema";
@@ -140,6 +141,127 @@ describe.sequential("Phosphene domain integration", () => {
     const matches = result.items.filter((task: any) => task.title === input.title);
     expect(matches).toHaveLength(1);
     dailyTaskId = matches[0].id;
+  });
+
+  it("pauses today's pending recurring occurrence immediately and restores it on a timely resume", async () => {
+    const seriesId = createId("series");
+    const taskId = createId("task");
+    await getDb().insert(taskSeries).values({
+      id: seriesId,
+      title: "Immediate pause daily",
+      description: "Should leave today's queue as soon as its series is paused",
+      difficulty: "easy",
+      basePoints: 3,
+      verificationMode: "ai_review",
+      proofRequirement: "text",
+      recurrence: "daily",
+      startDate: today,
+      nextOccurrenceDate: addCalendarDays(today, 1),
+      dailyDeadlineTime: "23:59",
+      active: true,
+      createdBy: "AI"
+    });
+    await getDb().insert(tasks).values({
+      id: taskId,
+      seriesId,
+      occurrenceDate: today,
+      title: "Immediate pause daily",
+      description: "",
+      type: "daily",
+      difficulty: "easy",
+      basePoints: 3,
+      status: "pending",
+      verificationMode: "ai_review",
+      proofRequirement: "text",
+      createdBy: "AI",
+      source: "recurring",
+      revealMode: "immediate",
+      revealedAt: new Date(),
+      deadlineAt: new Date(Date.now() + 86_400_000)
+    });
+
+    const paused = await manageTask({
+      action: "pause_series",
+      series_id: seriesId,
+      reason: "Take a break now",
+      idempotency_key: "integration-pause-series-now"
+    });
+    expect(paused).toMatchObject({ series_id: seriesId, active: false, affected_tasks: 1 });
+    expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, taskId) }))?.status).toBe("cancelled");
+    expect((await getDb().query.taskSeries.findFirst({ where: eq(taskSeries.id, seriesId) }))?.active).toBe(false);
+    expect(
+      (await queryTasks({ status: "pending", include_proof: false, limit: 100 })).items.some(
+        (task: any) => task.id === taskId
+      )
+    ).toBe(false);
+
+    const resumed = await manageTask({
+      action: "resume_series",
+      series_id: seriesId,
+      reason: "Continue today",
+      idempotency_key: "integration-resume-series-now"
+    });
+    expect(resumed).toMatchObject({ series_id: seriesId, active: true, affected_tasks: 1 });
+    expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, taskId) }))?.status).toBe("pending");
+
+    await submitTask(taskId, "Work already submitted for review", []);
+    const pausedAfterSubmission = await manageTask({
+      action: "pause_series",
+      series_id: seriesId,
+      reason: "Pause without discarding submitted work",
+      idempotency_key: "integration-pause-submitted-series"
+    });
+    expect(pausedAfterSubmission).toMatchObject({ active: false, affected_tasks: 0 });
+    expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, taskId) }))?.status).toBe("submitted");
+  });
+
+  it("requires and exposes a rejection reason with the rejected submission", async () => {
+    const created = await createTask({
+      title: "Review reason task",
+      description: "",
+      type: "challenge",
+      difficulty: "easy",
+      base_points: 3,
+      verification_mode: "ai_review",
+      proof_requirement: "text",
+      recurrence: "once",
+      daily_deadline_time: "23:59",
+      deadline: new Date(Date.now() + 86_400_000).toISOString(),
+      reveal_mode: "immediate",
+      idempotency_key: "integration-review-reason-task"
+    });
+    if (created.kind !== "task") throw new Error("Expected a one-time task");
+    await submitTask(created.task.id, "My first explanation", []);
+
+    await expect(
+      manageTask({
+        action: "review",
+        task_id: created.task.id,
+        decision: "reject",
+        idempotency_key: "integration-reject-without-reason"
+      })
+    ).rejects.toMatchObject({ code: "review_reason_required" });
+    expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, created.task.id) }))?.status).toBe("submitted");
+
+    const reason = "请补充完成时间，以及你实际做了哪些部分。";
+    await manageTask({
+      action: "review",
+      task_id: created.task.id,
+      decision: "reject",
+      reason,
+      idempotency_key: "integration-reject-with-reason"
+    });
+    const detail = await queryTasks({
+      task_id: created.task.id,
+      include_proof: true,
+      limit: 1
+    });
+    expect(detail.items[0]).toMatchObject({ status: "pending" });
+    expect((detail.items[0] as any)?.submissions?.[0]).toMatchObject({
+      status: "rejected",
+      proofText: "My first explanation",
+      reviewReason: reason
+    });
   });
 
   it("settles a self-confirmed task and unlocks the first achievement", async () => {

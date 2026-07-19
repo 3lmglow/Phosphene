@@ -5,7 +5,7 @@ import {
   TIMEZONE_OPTIONS,
   streakBonusForDay
 } from "../src/shared/constants";
-import { createTaskSchema, taskQuerySchema } from "../src/shared/schemas";
+import { createTaskSchema, manageTaskSchema, taskQuerySchema } from "../src/shared/schemas";
 import { addCalendarDays, localDate, localDateTime } from "../src/server/lib/dates";
 import { resolveDeployment } from "../src/server/lib/deployment";
 
@@ -66,6 +66,25 @@ describe("timezone-safe calendar helpers", () => {
         cursor: "not-a-timestamp"
       })
     ).toThrow();
+  });
+
+  it("requires a useful reason when an AI rejects a submission", () => {
+    expect(() =>
+      manageTaskSchema.parse({
+        action: "review",
+        task_id: "task_review",
+        decision: "reject",
+        idempotency_key: "reject-without-reason"
+      })
+    ).toThrow(/必须说明理由/);
+    expect(() =>
+      manageTaskSchema.parse({
+        action: "review",
+        task_id: "task_review",
+        decision: "approve",
+        idempotency_key: "approve-without-reason"
+      })
+    ).not.toThrow();
   });
 });
 
