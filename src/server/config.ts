@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { resolveDeployment } from "./lib/deployment";
-import { resolveSetupToken } from "./lib/runtime-secrets";
 
 try {
   process.loadEnvFile?.(".env");
@@ -54,20 +53,13 @@ const deployment = resolveDeployment({
   localStoragePath: parsed.LOCAL_STORAGE_PATH
 });
 const publicUrl = parsed.PUBLIC_URL ?? parsed.ZEABUR_WEB_URL ?? `http://localhost:${parsed.PORT}`;
-const setupToken = resolveSetupToken({
-  nodeEnv: parsed.NODE_ENV,
-  dataDir: deployment.dataDir,
-  configuredToken: parsed.PHOSPHENE_SETUP_TOKEN
-});
 
 export const config = {
   ...parsed,
   PUBLIC_URL: publicUrl,
-  PHOSPHENE_SETUP_TOKEN: setupToken.value,
   PHOSPHENE_DATA_DIR: deployment.dataDir,
   PGLITE_PATH: deployment.pglitePath,
   LOCAL_STORAGE_PATH: deployment.localStoragePath,
   DEPLOYMENT_MODE: deployment.mode,
-  SETUP_TOKEN_SOURCE: setupToken.source,
-  SETUP_TOKEN_ENV_REJECTED: setupToken.rejectedConfiguredToken
+  SETUP_PROTECTED: Boolean(parsed.PHOSPHENE_SETUP_TOKEN)
 };

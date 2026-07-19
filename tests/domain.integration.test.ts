@@ -2,9 +2,10 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initializeDatabase, getDb, shutdownDatabase } from "../src/server/db/client";
 import { seedDatabase } from "../src/server/db/seed";
-import { pointLedger, tasks } from "../src/server/db/schema";
+import { appSettings, pointLedger, tasks, userAccount } from "../src/server/db/schema";
 import { addCalendarDays, localDate } from "../src/server/lib/dates";
 import { createId } from "../src/server/lib/ids";
+import { setupApplication } from "../src/server/services/auth";
 import {
   createTask,
   adjustPoints,
@@ -153,5 +154,28 @@ describe.sequential("Phosphene domain integration", () => {
     expect((await getOverview()).statistics.balance).toBe(99);
     await restoreBackup(archive);
     expect((await getOverview()).statistics.balance).toBe(0);
+  });
+
+  it("lets the first visitor claim an uninitialized instance exactly once", async () => {
+    const response = { cookie: () => undefined } as any;
+    const input = {
+      setup_token: "",
+      password: "a-safe-local-password",
+      timezone,
+      user_label: "User",
+      ai_label: "AI"
+    };
+
+    const result = await setupApplication(input, response);
+    expect(result.ai_token).toMatch(/^phosphene_ai_/);
+    await expect(setupApplication(input, response)).rejects.toMatchObject({
+      status: 409,
+      code: "already_initialized"
+    });
+    expect(await getDb().query.userAccount.findMany()).toHaveLength(1);
+    expect((await getDb().query.appSettings.findFirst({ where: eq(appSettings.id, 1) }))?.initialized).toBe(true);
+    expect((await getDb().query.userAccount.findFirst({ where: eq(userAccount.id, 1) }))?.passwordHash).not.toBe(
+      input.password
+    );
   });
 });

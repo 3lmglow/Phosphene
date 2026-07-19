@@ -172,7 +172,7 @@ export const adjustPointsSchema = z
   });
 
 export const setupSchema = z.object({
-  setup_token: z.string().min(8),
+  setup_token: z.string().max(512).optional().default(""),
   password: z.string().min(10).max(256),
   timezone,
   user_label: z.string().trim().min(1).max(40).default("You"),

@@ -100,14 +100,14 @@ await initializeStorage();
 await seedDatabase();
 await reconcileSystem();
 const publicSettings = await getPublicSettings();
-if (!publicSettings.initialized && config.SETUP_TOKEN_SOURCE !== "environment") {
+if (!publicSettings.initialized) {
   logger.warn(
     {
-      setupToken: config.PHOSPHENE_SETUP_TOKEN,
-      source: config.SETUP_TOKEN_SOURCE,
-      ignoredInvalidEnvironmentValue: config.SETUP_TOKEN_ENV_REJECTED
+      setupMode: config.SETUP_PROTECTED ? "token_protected" : "first_visitor"
     },
-    "No valid PHOSPHENE_SETUP_TOKEN was supplied. Use this persisted one-time Setup Token."
+    config.SETUP_PROTECTED
+      ? "Phosphene is awaiting token-protected first-time setup."
+      : "Phosphene is awaiting first-visitor setup. Initialize it before sharing the URL."
   );
 }
 

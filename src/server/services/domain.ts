@@ -23,6 +23,7 @@ import type {
 } from "../../shared/schemas";
 import type { z } from "zod";
 import type { settingsSchema } from "../../shared/schemas";
+import { config } from "../config";
 import { getDb } from "../db/client";
 import {
   achievementUnlocks,
@@ -979,6 +980,7 @@ export async function getPublicSettings() {
   const settings = await getSettings(getDb());
   return {
     initialized: settings.initialized,
+    setup_protected: config.SETUP_PROTECTED,
     timezone: settings.timezone,
     user_label: settings.userLabel,
     ai_label: settings.aiLabel

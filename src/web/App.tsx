@@ -52,6 +52,7 @@ import { api, ApiError, idempotencyKey } from "./api";
 
 type Bootstrap = {
   initialized: boolean;
+  setup_protected: boolean;
   timezone: string;
   user_label: string;
   ai_label: string;
@@ -175,7 +176,13 @@ function AuthBackdrop({ children, eyebrow, title, copy }: { children: ReactNode;
   );
 }
 
-function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
+function SetupPage({
+  setupProtected,
+  onReady
+}: {
+  setupProtected: boolean;
+  onReady: (bootstrap: Bootstrap) => void;
+}) {
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -190,11 +197,31 @@ function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
   });
   const [showPassword, setShowPassword] = useState(false);
 
+  function credentialError() {
+    if (setupProtected && !form.setup_token.trim()) return "请输入部署时设置的 Setup Token。";
+    if (form.password.length < 10) return "登录密码至少需要 10 个字符。";
+    if (form.password.length > 256) return "登录密码不能超过 256 个字符。";
+    if (form.password !== form.passwordConfirm) return "两次输入的密码不一致。";
+    return "";
+  }
+
+  function continueSetup() {
+    const message = credentialError();
+    if (message) {
+      setError(message);
+      return;
+    }
+    setError("");
+    setStep(2);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
-    if (form.password !== form.passwordConfirm) {
-      setError("两次输入的密码不一致。");
+    const message = credentialError();
+    if (message) {
+      setError(message);
+      setStep(1);
       return;
     }
     setBusy(true);
@@ -234,6 +261,7 @@ function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
             onClick={() =>
               onReady({
                 initialized: true,
+                setup_protected: setupProtected,
                 timezone: form.timezone,
                 user_label: form.user_label,
                 ai_label: form.ai_label
@@ -262,27 +290,41 @@ function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
           ))}
         </div>
         <p className="step-label">首次设置 · {step}/2</p>
-        <h2>{step === 1 ? "先确认这是你的空间" : "再告诉我，怎么称呼你们"}</h2>
+        <h2>
+          {step === 1
+            ? setupProtected
+              ? "先确认这是你的空间"
+              : "认领你的 Phosphene"
+            : "再告诉我，怎么称呼你们"}
+        </h2>
         <p className="muted">
-          {step === 1 ? "Setup Token 只用于这一次初始化；未手动配置时，可在部署运行日志中复制自动生成的 setupToken。" : "这些称呼只影响页面展示，内部权限始终保持 AI / user。"}
+          {step === 1
+            ? setupProtected
+              ? "这个实例启用了 Setup Token 保护，验证后才能设置唯一的登录密码。"
+              : "这是一个尚未认领的新实例。设置密码并完成初始化后，首次设置入口会永久关闭。"
+            : "这些称呼只影响页面展示，内部权限始终保持 AI / user。"}
         </p>
         {error && <InlineError message={error} />}
         {step === 1 ? (
           <>
-            <Field label="Setup Token">
-              <input
-                autoFocus
-                required
-                value={form.setup_token}
-                onChange={(event) => setForm({ ...form, setup_token: event.target.value })}
-                placeholder="粘贴环境变量或运行日志中的 Setup Token"
-              />
-            </Field>
+            {setupProtected && (
+              <Field label="Setup Token">
+                <input
+                  autoFocus
+                  required
+                  value={form.setup_token}
+                  onChange={(event) => setForm({ ...form, setup_token: event.target.value })}
+                  placeholder="粘贴部署时设置的 Setup Token"
+                />
+              </Field>
+            )}
             <Field label="登录密码" hint="至少 10 个字符">
               <div className="input-with-icon">
                 <input
+                  autoFocus={!setupProtected}
                   required
                   minLength={10}
+                  maxLength={256}
                   type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(event) => setForm({ ...form, password: event.target.value })}
@@ -296,13 +338,15 @@ function SetupPage({ onReady }: { onReady: (bootstrap: Bootstrap) => void }) {
             <Field label="再次输入密码">
               <input
                 required
+                minLength={10}
+                maxLength={256}
                 type={showPassword ? "text" : "password"}
                 value={form.passwordConfirm}
                 onChange={(event) => setForm({ ...form, passwordConfirm: event.target.value })}
                 placeholder="确认刚才的密码"
               />
             </Field>
-            <button type="button" className="button button--primary button--wide" onClick={() => setStep(2)}>
+            <button type="button" className="button button--primary button--wide" onClick={continueSetup}>
               继续 <ArrowRight size={17} />
             </button>
           </>
@@ -1355,7 +1399,17 @@ export default function App() {
     try { await api("/logout", { method: "POST" }); } finally { setState("login"); }
   }
   if (state === "loading") return <FullPageLoader />;
-  if (state === "setup") return <SetupPage onReady={(data) => { setBootstrap(data); setState("ready"); }} />;
+  if (state === "setup") {
+    return (
+      <SetupPage
+        setupProtected={bootstrap?.setup_protected ?? false}
+        onReady={(data) => {
+          setBootstrap(data);
+          setState("ready");
+        }}
+      />
+    );
+  }
   if (state === "login") return <LoginPage onLogin={() => setState("ready")} />;
   return <AppShell onLogout={doLogout} />;
 }

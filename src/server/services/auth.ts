@@ -6,6 +6,7 @@ import { getDb } from "../db/client";
 import { aiTokens, appSettings, auditLogs, sessions, userAccount } from "../db/schema";
 import { AppError, assertFound, assertState } from "../errors";
 import { createId, createSecret, tokenHash } from "../lib/ids";
+import { acceptsSetupToken } from "../lib/setup-access";
 
 const SESSION_COOKIE = "phosphene_session";
 const CSRF_COOKIE = "phosphene_csrf";
@@ -46,14 +47,15 @@ export async function setupApplication(
   values: { setup_token: string; password: string; timezone: string; user_label: string; ai_label: string },
   response: Response
 ) {
-  assertState(values.setup_token === config.PHOSPHENE_SETUP_TOKEN, "invalid_setup_token", "Setup token is invalid");
+  if (!acceptsSetupToken(config.PHOSPHENE_SETUP_TOKEN, values.setup_token)) {
+    throw new AppError(401, "invalid_setup_token", "Setup token is invalid");
+  }
   const db = getDb();
+  const settings = assertFound(await db.query.appSettings.findFirst({ where: eq(appSettings.id, 1) }));
+  assertState(!settings.initialized, "already_initialized", "Phosphene has already been set up");
+  const passwordHash = await argon2.hash(values.password, { type: argon2.argon2id });
   return db.transaction(async (tx: any) => {
-    const settings = assertFound(await tx.query.appSettings.findFirst({ where: eq(appSettings.id, 1) }));
-    assertState(!settings.initialized, "already_initialized", "Phosphene has already been set up");
-    const passwordHash = await argon2.hash(values.password, { type: argon2.argon2id });
-    await tx.insert(userAccount).values({ id: 1, passwordHash });
-    await tx
+    const [claimed] = await tx
       .update(appSettings)
       .set({
         initialized: true,
@@ -62,7 +64,10 @@ export async function setupApplication(
         aiLabel: values.ai_label,
         updatedAt: new Date()
       })
-      .where(eq(appSettings.id, 1));
+      .where(and(eq(appSettings.id, 1), eq(appSettings.initialized, false)))
+      .returning({ id: appSettings.id });
+    assertState(claimed, "already_initialized", "Phosphene has already been set up");
+    await tx.insert(userAccount).values({ id: 1, passwordHash });
     const aiToken = `phosphene_ai_${createSecret(32)}`;
     const aiTokenId = createId("aitoken");
     await tx.insert(aiTokens).values({

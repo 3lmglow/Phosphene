@@ -51,7 +51,7 @@ assert(compose.services.app.depends_on.postgresql.condition === "service_healthy
 assert(compose.services.app.depends_on.minio.condition === "service_healthy", "Compose must wait for MinIO");
 assert(
   compose.services.app.environment.PHOSPHENE_SETUP_TOKEN.includes(":-"),
-  "Compose must allow the app to generate its persistent Setup Token"
+  "Compose must allow first-visitor setup when the optional Setup Token is omitted"
 );
 assert(
   !("SESSION_SECRET" in compose.services.app.environment),

@@ -12,8 +12,8 @@ spec:
       description: Choose the private web domain for this Phosphene instance.
     - key: PHOSPHENE_SETUP_TOKEN
       type: STRING
-      name: One-time setup token
-      description: Use a long random value. It is required only on the first setup screen.
+      name: Optional setup protection
+      description: Leave blank for first-visitor setup, or enter a long private value to protect claiming.
     - key: PHOSPHENE_TIMEZONE
       type: STRING
       name: Timezone
@@ -160,8 +160,8 @@ spec:
           description: 为你的私人网站选择域名。
         - key: PHOSPHENE_SETUP_TOKEN
           type: STRING
-          name: 一次性 Setup Token
-          description: 请填写较长的随机字符串，仅首次设置时使用。
+          name: 可选的首次设置保护
+          description: 留空则由首位访问者认领；也可填写一段较长的私密字符串保护认领过程。
         - key: PHOSPHENE_TIMEZONE
           type: STRING
           name: 时区
