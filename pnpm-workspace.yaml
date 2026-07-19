@@ -1,0 +1,12 @@
+packages:
+  - "."
+
+allowBuilds:
+  argon2: true
+  esbuild: true
+  sharp: true
+
+onlyBuiltDependencies:
+  - argon2
+  - esbuild
+  - sharp

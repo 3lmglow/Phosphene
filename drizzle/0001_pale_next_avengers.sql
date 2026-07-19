@@ -1,0 +1,1 @@
+ALTER TABLE "task_series" ADD COLUMN "next_occurrence_date" date DEFAULT current_date NOT NULL;
