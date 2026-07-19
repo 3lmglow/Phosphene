@@ -83,6 +83,11 @@ type Overview = {
   recent_achievements: Array<{ achievement: Achievement; unlockedAt: string }>;
   labels: { user: string; ai: string };
   timezone: string;
+  boundaries: {
+    punishment_intensity: number;
+    daily_penalty_limit: number;
+    punishments_paused: boolean;
+  };
 };
 
 type Task = {
@@ -625,7 +630,7 @@ function Dashboard({ aiLabel }: { aiLabel: string }) {
   if (loading && !data) return <PageLoader />;
   if (error || !data) return <PageError message={error} retry={refresh} />;
   const hour = new Date().getHours();
-  const greeting = hour < 6 ? "夜还很深" : hour < 12 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
+  const greeting = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
   return (
     <div className="page dashboard-page">
       <PageHeader
@@ -1164,6 +1169,48 @@ function InsightsPage() {
         <StatCard icon={<Sparkles />} label="累计获得" value={stats.totalEarned} suffix="分" />
         <StatCard icon={<Trophy />} label="最长连击" value={stats.longestStreak} suffix="天" />
       </section>
+      <section className="section-block rules-section">
+        <SectionHeading title="奖惩规则" copy="所有积分由服务器结算，结果会进入不可改写的积分账本" />
+        <div className="rules-grid">
+          <article className="rule-card rule-card--reward">
+            <span><Coins /></span>
+            <p>任务奖励</p>
+            <strong>基础积分 × 难度</strong>
+            <div className="rule-scale"><em>轻盈 ×1</em><em>认真 ×2</em><em>高难 ×3</em></div>
+          </article>
+          <article className="rule-card rule-card--streak">
+            <span><Flame /></span>
+            <p>连击加成</p>
+            <strong>每天完成至少一项</strong>
+            <small>第 1 天 +0 · 2–5 天 +1 · 6–7 天 +2 · 第 8 天起 +3</small>
+          </article>
+          <article className="rule-card rule-card--penalty">
+            <span><Activity /></span>
+            <p>失败与逾期</p>
+            <strong>扣最终积分的 50%</strong>
+            <small>小数向上取整；实际扣分不会超过当前余额，积分不会降到 0 以下。</small>
+          </article>
+          <article className="rule-card rule-card--boundary">
+            <span><ShieldCheck /></span>
+            <p>AI 惩罚边界</p>
+            <strong>
+              {overview.data.boundaries.punishments_paused
+                ? "当前已暂停"
+                : `每日最多 ${overview.data.boundaries.daily_penalty_limit} 分`}
+            </strong>
+            <small>
+              {overview.data.boundaries.punishments_paused
+                ? "AI 主动判定失败和额外扣分会被服务端拒绝。"
+                : "AI 主动判定失败与额外扣分共享这一每日上限。"}
+            </small>
+          </article>
+        </div>
+        <p className="rules-note">
+          <ShieldCheck />
+          取消任务和打回提交不会扣分。自动逾期不占用 AI 的每日额度；“惩罚强度”
+          {overview.data.boundaries.punishment_intensity} 只用于帮助 AI 理解边界，不会放大扣分。
+        </p>
+      </section>
       <section className="breakdown-grid">
         <Breakdown title="按任务类型" values={[
           ["日常", stats.byType.daily ?? 0, "coral"],
@@ -1222,7 +1269,7 @@ function Breakdown({ title, values }: { title: string; values: Array<[string, nu
 
 const historyScopeCopy: Record<string, string> = {
   all: "按真正发生的事情汇总；任务结算与兑换扣分只出现一次，不与积分账本重复。",
-  tasks: "只看任务的最终结果。对应的奖励或扣分可在“积分”账本逐笔核对。",
+  tasks: "只看任务的最终结果，并直接显示实际奖励或扣分；“积分”栏保留完整账本。",
   points: "完整积分账本。这里的每一行，都是一笔真实影响余额的收支。",
   redemptions: "只看兑换成本与履行状态；积分会在提交兑换时立即扣除。",
   audit: "安全与管理操作记录，用来追溯谁做了什么，不参与余额计算。"
@@ -1284,10 +1331,16 @@ function TimelineEvent({ event, aiLabel, userLabel }: { event: any; aiLabel: str
     kindLabel = "任务";
     title = event.title;
     const status = statusLabel[event.status as keyof typeof statusLabel] ?? event.status;
-    copy = event.status === "completed"
-      ? `${typeLabel[event.type as keyof typeof typeLabel] ?? "任务"} · ${status} · 奖励已记入积分`
-      : `${status} · 扣分如有，已记入积分账本`;
-    if (event.status === "completed") amount = pointsFor(event);
+    const penalty = Math.max(0, Number(event.penaltyAmount ?? 0));
+    if (event.status === "completed") {
+      copy = `${typeLabel[event.type as keyof typeof typeLabel] ?? "任务"} · ${status} · 奖励已记入积分`;
+      amount = pointsFor(event);
+    } else if (event.status === "failed" || event.status === "expired") {
+      copy = penalty > 0 ? `${status} · 实际扣除 ${penalty} 积分` : `${status} · 本次未实际扣分`;
+      if (penalty > 0) amount = -penalty;
+    } else {
+      copy = `${status} · 未扣分`;
+    }
   } else if (event.eventKind === "points") {
     icon = <Coins />;
     kindLabel = "积分";

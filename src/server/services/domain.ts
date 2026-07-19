@@ -950,11 +950,35 @@ export async function queryHistory(input: {
   const kind = input.kind ?? "all";
   const result: Record<string, unknown> = {};
   if (kind === "all" || kind === "tasks") {
-    result.tasks = await db.query.tasks.findMany({
+    const taskRows = await db.query.tasks.findMany({
       where: inArray(tasks.status, ["completed", "failed", "expired", "cancelled"]),
       orderBy: [desc(tasks.updatedAt)],
       limit
     });
+    const taskIds = taskRows.map((task: any) => task.id);
+    const penaltyRows = taskIds.length
+      ? await db
+          .select({ taskId: pointLedger.taskId, amount: pointLedger.amount })
+          .from(pointLedger)
+          .where(
+            and(
+              eq(pointLedger.type, "task_penalty"),
+              inArray(pointLedger.taskId, taskIds)
+            )
+          )
+      : [];
+    const penaltyByTask = new Map<string, number>();
+    for (const row of penaltyRows) {
+      if (!row.taskId) continue;
+      penaltyByTask.set(
+        row.taskId,
+        (penaltyByTask.get(row.taskId) ?? 0) + Math.max(0, -Number(row.amount))
+      );
+    }
+    result.tasks = taskRows.map((task: any) => ({
+      ...task,
+      penaltyAmount: penaltyByTask.get(task.id) ?? 0
+    }));
   }
   if (kind === "all" || kind === "points") {
     const rows = await db.query.pointLedger.findMany({ orderBy: [desc(pointLedger.createdAt)], limit });

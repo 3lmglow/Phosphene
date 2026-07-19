@@ -1734,6 +1734,80 @@ svg {
 .stat-card strong { font: 500 29px var(--serif); }
 .stat-card em { margin-left: 4px; color: var(--ink-faint); font: normal 9px var(--sans); }
 
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rules-section { margin-bottom: 52px; }
+
+.rule-card {
+  min-height: 180px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 18px 18px 18px 7px;
+  background: rgba(255, 253, 251, .84);
+}
+
+.rule-card > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  color: var(--violet);
+  border-radius: 12px 12px 12px 4px;
+  background: #e9e4f3;
+}
+
+.rule-card > span svg { width: 18px; }
+.rule-card > p { margin: 18px 0 5px; color: var(--ink-faint); font-size: 10px; }
+.rule-card > strong { font: 500 18px/1.3 var(--serif); }
+.rule-card > small { margin-top: 10px; color: var(--ink-faint); font-size: 10px; line-height: 1.65; }
+.rule-card--reward > span { color: #9a6633; background: #f5ead5; }
+.rule-card--streak > span { color: #b35f57; background: #f7e3df; }
+.rule-card--penalty > span { color: #98545b; background: #f3e1e4; }
+.rule-card--boundary > span { color: #55715e; background: #e4eee5; }
+
+.rule-scale {
+  margin-top: auto;
+  padding-top: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.rule-scale em {
+  padding: 4px 7px;
+  color: var(--ink-faint);
+  border-radius: 20px;
+  background: var(--surface-muted);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.rules-note {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--ink-faint);
+  border: 1px solid rgba(113, 102, 150, .13);
+  border-radius: 13px 13px 13px 5px;
+  background: rgba(253, 252, 255, .58);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.rules-note svg {
+  width: 16px;
+  flex: none;
+  color: var(--violet);
+}
+
 .breakdown-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2044,6 +2118,7 @@ svg {
   .hero-grid { grid-template-columns: 1.4fr 1fr 0.65fr; }
   .mini-stat:last-child { display: none; }
   .reward-grid { grid-template-columns: repeat(2, 1fr); }
+  .rules-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .achievement-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
@@ -2102,6 +2177,7 @@ svg {
   .insight-hero { padding: 30px 20px; grid-template-columns: 1fr; justify-items: center; gap: 25px; }
   .insight-copy { text-align: center; }
   .stats-grid { grid-template-columns: 1fr 1fr; }
+  .rules-grid { grid-template-columns: 1fr; }
   .breakdown-grid { grid-template-columns: 1fr; }
   .achievement-grid { grid-template-columns: repeat(2, 1fr); }
   .settings-panel { padding: 23px 17px; }

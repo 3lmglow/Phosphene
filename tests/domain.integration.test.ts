@@ -30,6 +30,7 @@ import {
   listAchievements,
   manageRewards,
   manageTask,
+  queryHistory,
   queryTasks,
   reconcileSystem,
   redeemReward,
@@ -585,6 +586,8 @@ describe.sequential("Phosphene domain integration", () => {
     expect(retry.task_id).toBe(failed.task_id);
     expect(retry.penalty).toBe(failed.penalty);
     expect(failed.penalty).toBe(5);
+    const taskHistory = await queryHistory({ kind: "tasks", limit: 100 }) as { tasks: any[] };
+    expect(taskHistory.tasks.find((task) => task.id === created.task.id)?.penaltyAmount).toBe(5);
     expect((await getOverview()).statistics.balance).toBe(0);
   });
 
