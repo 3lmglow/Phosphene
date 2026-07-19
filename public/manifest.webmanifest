@@ -9,10 +9,16 @@
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "any",
-  "background_color": "#f4f2f8",
-  "theme_color": "#17152b",
+  "background_color": "#141928",
+  "theme_color": "#141928",
   "categories": ["lifestyle", "productivity"],
   "icons": [
+    {
+      "src": "/icons/phosphene-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/icons/phosphene-192.png",
       "sizes": "192x192",
