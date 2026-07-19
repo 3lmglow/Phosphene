@@ -2,7 +2,7 @@ export const PRESET_REWARDS = [
   {
     id: "reward_writing",
     name: "指定 AI 写东西",
-    description: "给 AI 一个主题，由它专门为你写。",
+    description: "给 AI 一个主题，由 ta 专门为你写。",
     cost: 15,
     sortOrder: 10
   },
@@ -12,6 +12,14 @@ export const PRESET_REWARDS = [
     description: "在双方边界内，今天由你做一次主。",
     cost: 20,
     sortOrder: 20
+  }
+] as const;
+
+export const LEGACY_PRESET_REWARD_COPY = [
+  {
+    id: "reward_writing",
+    name: "指定 AI 写东西",
+    description: "给 AI 一个主题，由它专门为你写。"
   }
 ] as const;
 
@@ -39,12 +47,13 @@ export function presentRewardItem<
 >(item: T, aiLabel: string): T {
   const preset = PRESET_REWARDS.find((candidate) => candidate.id === item.id);
   if (!preset) return item;
+  const legacy = LEGACY_PRESET_REWARD_COPY.find((candidate) => candidate.id === item.id);
   return {
     ...item,
     name: item.name === preset.name ? replaceAiLabel(item.name, aiLabel) : item.name,
     description:
-      item.description === preset.description
-        ? replaceAiLabel(item.description, aiLabel)
+      item.description === preset.description || item.description === legacy?.description
+        ? replaceAiLabel(preset.description, aiLabel)
         : item.description
   };
 }

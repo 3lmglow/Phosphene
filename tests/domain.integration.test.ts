@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initializeDatabase, getDb, shutdownDatabase } from "../src/server/db/client";
 import { seedDatabase } from "../src/server/db/seed";
-import { appSettings, pointLedger, tasks, userAccount } from "../src/server/db/schema";
+import { appSettings, pointLedger, rewardItems, tasks, userAccount } from "../src/server/db/schema";
 import { addCalendarDays, localDate } from "../src/server/lib/dates";
 import { createId } from "../src/server/lib/ids";
 import { setupApplication } from "../src/server/services/auth";
@@ -116,9 +116,15 @@ describe.sequential("Phosphene domain integration", () => {
 
   it("presents the two universal presets with the chosen label and retires old defaults", async () => {
     await getDb().update(appSettings).set({ aiLabel: "星沉" }).where(eq(appSettings.id, 1));
+    await getDb()
+      .update(rewardItems)
+      .set({ description: "给 AI 一个主题，由它专门为你写。" })
+      .where(eq(rewardItems.id, "reward_writing"));
+    await seedDatabase();
     const rewards = await manageRewards({ action: "list", include_archived: false }) as any[];
     expect(rewards.map((reward: any) => reward.id)).toEqual(["reward_writing", "reward_listen"]);
     expect(rewards.find((reward: any) => reward.id === "reward_writing")?.name).toBe("指定 星沉 写东西");
+    expect(rewards.find((reward: any) => reward.id === "reward_writing")?.description).toBe("给 星沉 一个主题，由 ta 专门为你写。");
     expect(rewards.find((reward: any) => reward.id === "reward_listen")?.name).toBe("“星沉 听你的”券");
   });
 
@@ -162,6 +168,13 @@ describe.sequential("Phosphene domain integration", () => {
       idempotency_key: "integration-update-custom-reward"
     });
     expect((updated as any).reward.cost).toBe(18);
+    const visible = await manageRewards({ action: "list", include_archived: false }) as any[];
+    expect(visible.find((reward: any) => reward.id === rewardId)).toMatchObject({
+      name: "一起看一部电影",
+      description: "今晚共同挑选一部电影。",
+      cost: 18,
+      active: true
+    });
     await manageRewards({
       action: "archive",
       reward_id: rewardId,

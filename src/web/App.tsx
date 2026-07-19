@@ -541,7 +541,7 @@ function AppShell({
           <Route path="/tasks" element={<TasksPage aiLabel={bootstrap.ai_label} />} />
           <Route path="/rewards" element={<RewardsPage aiLabel={bootstrap.ai_label} />} />
           <Route path="/insights" element={<InsightsPage />} />
-          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/history" element={<HistoryPage aiLabel={bootstrap.ai_label} />} />
           <Route
             path="/settings"
             element={
@@ -596,21 +596,23 @@ function useLoad<T>(loader: () => Promise<T>, dependencies: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading: boolean) => {
+    if (showLoading) setLoading(true);
     try {
       setData(await loader());
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "加载失败。");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, dependencies);
+  const refresh = useCallback(() => load(true), [load]);
+  const revalidate = useCallback(() => load(false), [load]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  return { data, error, loading, refresh };
+  return { data, error, loading, refresh, revalidate };
 }
 
 function Dashboard({ aiLabel }: { aiLabel: string }) {
@@ -933,8 +935,30 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
   const rewards = useLoad<any[]>(() => api("/rewards"), []);
   const redemptions = useLoad<any[]>(() => api("/redemptions"), []);
   const [redeeming, setRedeeming] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState("");
   const visibleAiLabel = overview.data?.labels.ai || aiLabel;
+  const sync = useCallback(async (showFeedback = false) => {
+    if (showFeedback) setSyncing(true);
+    await Promise.all([overview.revalidate(), rewards.revalidate(), redemptions.revalidate()]);
+    if (showFeedback) setSyncing(false);
+  }, [overview.revalidate, rewards.revalidate, redemptions.revalidate]);
+  useEffect(() => {
+    const onFocus = () => void sync();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void sync();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void sync();
+    }, 30_000);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [sync]);
   async function redeem(item: any) {
     if (!confirm(`使用 ${item.cost} 积分兑换“${item.name}”？`)) return;
     setRedeeming(item.id);
@@ -944,7 +968,7 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
         body: { idempotency_key: idempotencyKey("redeem") }
       });
       setNotice(`兑换成功，${item.cost} 积分已扣除。现在等待 ${visibleAiLabel} 履行“${item.name}”。`);
-      await Promise.all([overview.refresh(), redemptions.refresh()]);
+      await sync();
     } catch (reason) {
       setNotice(reason instanceof Error ? reason.message : "兑换失败。");
     } finally {
@@ -957,10 +981,17 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
         eyebrow="REWARDS"
         title="把积分变成愿望"
         copy="每一次完成都不是抽象的数字，它们可以在这里换成真正想要的回应。"
-        action={<div className="header-balance"><Coins /><span>可用</span><strong>{overview.data?.statistics.balance ?? "—"}</strong></div>}
+        action={
+          <div className="rewards-header-actions">
+            <button className="button button--secondary rewards-sync" type="button" disabled={syncing} onClick={() => void sync(true)}>
+              <RotateCw size={16} />{syncing ? "同步中…" : "同步奖励"}
+            </button>
+            <div className="header-balance"><Coins /><span>可用</span><strong>{overview.data?.statistics.balance ?? "—"}</strong></div>
+          </div>
+        }
       />
       {notice && <div className="notice-banner"><Sparkles />{notice}<button onClick={() => setNotice("")}><X /></button></div>}
-      {rewards.loading ? <PageLoader compact /> : rewards.data?.length ? (
+      {rewards.loading ? <PageLoader compact /> : rewards.error && !rewards.data ? <PageError message={rewards.error} retry={rewards.refresh} /> : rewards.data?.length ? (
         <section className="reward-grid">
           {rewards.data?.map((item, index) => (
             <article className="reward-card" key={item.id}>
@@ -1095,7 +1126,17 @@ function Breakdown({ title, values }: { title: string; values: Array<[string, nu
   );
 }
 
-function HistoryPage() {
+const historyScopeCopy: Record<string, string> = {
+  all: "按真正发生的事情汇总；任务结算与兑换扣分只出现一次，不与积分账本重复。",
+  tasks: "只看任务的最终结果。对应的奖励或扣分可在“积分”账本逐笔核对。",
+  points: "完整积分账本。这里的每一行，都是一笔真实影响余额的收支。",
+  redemptions: "只看兑换成本与履行状态；积分会在提交兑换时立即扣除。",
+  audit: "安全与管理操作记录，用来追溯谁做了什么，不参与余额计算。"
+};
+
+const summarizedLedgerTypes = new Set(["task_reward", "task_penalty", "redemption"]);
+
+function HistoryPage({ aiLabel }: { aiLabel: string }) {
   const [kind, setKind] = useState("all");
   const { data, loading, error, refresh } = useLoad<any>(() => api(`/history?kind=${kind}&limit=100`), [kind]);
   const events = useMemo(() => {
@@ -1105,7 +1146,9 @@ function HistoryPage() {
     if (kind === "redemptions") return (data.redemptions ?? []).map((item: any) => ({ ...item, eventKind: "redemptions", date: item.redeemedAt }));
     if (kind === "audit") return (data.audit ?? []).map((item: any) => ({ ...item, eventKind: "audit", date: item.createdAt }));
     return [
-      ...(data.points ?? []).map((item: any) => ({ ...item, eventKind: "points", date: item.createdAt })),
+      ...(data.points ?? [])
+        .filter((item: any) => !summarizedLedgerTypes.has(item.type))
+        .map((item: any) => ({ ...item, eventKind: "points", date: item.createdAt })),
       ...(data.tasks ?? []).map((item: any) => ({ ...item, eventKind: "tasks", date: item.updatedAt })),
       ...(data.redemptions ?? []).map((item: any) => ({ ...item, eventKind: "redemptions", date: item.redeemedAt }))
     ].sort((a, b) => +new Date(b.date) - +new Date(a.date)).slice(0, 100);
@@ -1114,13 +1157,14 @@ function HistoryPage() {
     <div className="page">
       <PageHeader eyebrow="HISTORY" title="每一次发生，都有迹可循" copy="积分不会被悄悄改写，任务也不会无声消失。这里保留完整的时间线。" />
       <div className="segmented segmented--standalone">
-        {[["all", "全部"], ["tasks", "任务"], ["points", "积分"], ["redemptions", "兑换"], ["audit", "审计"]].map(([value, label]) =>
+        {[["all", "总览"], ["tasks", "任务"], ["points", "积分"], ["redemptions", "兑换"], ["audit", "审计"]].map(([value, label]) =>
           <button key={value} className={kind === value ? "active" : ""} onClick={() => setKind(value)}>{label}</button>
         )}
       </div>
+      <p className="history-scope-note"><ShieldCheck size={15} />{historyScopeCopy[kind]}</p>
       {loading ? <PageLoader compact /> : error ? <PageError message={error} retry={refresh} /> : (
         <div className="timeline">
-          {events.length ? events.map((event: any, index: number) => <TimelineEvent key={`${event.eventKind}-${event.id}-${index}`} event={event} />) :
+          {events.length ? events.map((event: any, index: number) => <TimelineEvent key={`${event.eventKind}-${event.id}-${index}`} event={event} aiLabel={aiLabel} />) :
             <EmptyState icon={<History />} title="时间线还是空的" copy="完成任务、获得积分或兑换奖励后，记录会出现在这里。" />}
         </div>
       )}
@@ -1128,35 +1172,107 @@ function HistoryPage() {
   );
 }
 
-function TimelineEvent({ event }: { event: any }) {
+function TimelineEvent({ event, aiLabel }: { event: any; aiLabel: string }) {
   let icon: ReactNode = <Sparkles />;
-  let title = event.reason ?? event.summary ?? "记录";
+  let kindLabel = "记录";
+  let title = "记录";
   let copy = "";
   let amount: number | null = null;
   if (event.eventKind === "tasks") {
     icon = event.status === "completed" ? <Check /> : <ListTodo />;
+    kindLabel = "任务";
     title = event.title;
-    copy = statusLabel[event.status as keyof typeof statusLabel] ?? event.status;
+    const status = statusLabel[event.status as keyof typeof statusLabel] ?? event.status;
+    copy = event.status === "completed"
+      ? `${typeLabel[event.type as keyof typeof typeLabel] ?? "任务"} · ${status} · 奖励已记入积分`
+      : `${status} · 扣分如有，已记入积分账本`;
+    if (event.status === "completed") amount = pointsFor(event);
   } else if (event.eventKind === "points") {
     icon = <Coins />;
+    kindLabel = "积分";
+    title = ledgerLabel(event.type);
     amount = event.amount;
-    copy = ledgerLabel(event.type);
+    copy = formatLedgerReason(event.reason);
   } else if (event.eventKind === "redemptions") {
     icon = <Gift />;
-    title = event.itemNameSnapshot;
-    copy = event.status === "fulfilled" ? "奖励已履行" : "兑换已提交";
+    kindLabel = "兑换";
+    title = presentRewardSnapshot(event.itemNameSnapshot, aiLabel);
+    copy = event.status === "fulfilled"
+      ? `已履行 · 兑换时已扣除 ${event.costSnapshot} 积分`
+      : event.status === "cancelled"
+        ? "已取消"
+        : `等待履行 · 已扣除 ${event.costSnapshot} 积分`;
     amount = -event.costSnapshot;
   } else {
     icon = <ShieldCheck />;
-    copy = event.action;
+    kindLabel = "审计";
+    title = auditActionLabel(event.action);
+    copy = `${auditActorLabel(event.actor, aiLabel)} · ${auditEntityLabel(event.entityType)}`;
   }
   return (
     <article className="timeline-event">
       <div className="timeline-event__icon">{icon}</div>
-      <div><span>{formatDate(event.date, true)}</span><h3>{title}</h3><p>{copy}</p></div>
+      <div className="timeline-event__content">
+        <div className="timeline-event__meta"><span>{formatDate(event.date, true)}</span><em>{kindLabel}</em></div>
+        <h3>{title}</h3>
+        <p>{copy}</p>
+      </div>
       {amount != null && <strong className={amount >= 0 ? "positive" : "negative"}>{amount >= 0 ? "+" : ""}{amount}</strong>}
     </article>
   );
+}
+
+function formatLedgerReason(reason = "") {
+  if (reason.startsWith("Completed: ")) return `完成任务：${reason.slice("Completed: ".length)}`;
+  if (reason.startsWith("Redeemed: ")) return `兑换：${reason.slice("Redeemed: ".length)}`;
+  const streak = reason.match(/^Day (\d+) streak bonus$/);
+  if (streak) return `第 ${streak[1]} 天连击奖励`;
+  if (reason === "Streak bonus recalculated after historical completion") return "历史任务补录后的连击校正";
+  if (reason === "Task expired") return "任务逾期";
+  return reason || "系统记账";
+}
+
+function auditActorLabel(actor: string, aiLabel: string) {
+  return actor === "AI" ? aiLabel : actor === "user" ? "用户" : "系统";
+}
+
+function auditEntityLabel(entity: string) {
+  return {
+    task: "任务",
+    task_series: "每日任务",
+    reward: "奖励",
+    redemption: "兑换",
+    point_ledger: "积分",
+    settings: "设置",
+    system: "系统"
+  }[entity] ?? "记录";
+}
+
+function auditActionLabel(action: string) {
+  return {
+    "task.created": "创建任务",
+    "task.edited": "编辑任务",
+    "task.completed": "确认任务完成",
+    "task.failed": "判定任务未通过",
+    "task.expired": "任务逾期",
+    "task.cancelled": "取消任务",
+    "task.penalized": "结算任务扣分",
+    "task_series.created": "创建每日任务",
+    "task_series.resumed": "恢复每日任务",
+    "task_series.paused": "暂停每日任务",
+    "submission.created": "提交任务证据",
+    "submission.rejected": "退回任务证据",
+    "reward.created": "创建可兑换奖励",
+    "reward.updated": "更新可兑换奖励",
+    "reward.archived": "归档可兑换奖励",
+    "reward.redeemed": "提交奖励兑换",
+    "redemption.fulfilled": "确认奖励已履行",
+    "points.bonus": "发放额外积分",
+    "points.penalty": "执行额外扣分",
+    "points.correction": "校正积分账本",
+    "settings.updated": "更新用户设置",
+    "system.reconciled": "完成系统日常结算"
+  }[action] ?? "系统操作";
 }
 
 function ledgerLabel(type: string) {

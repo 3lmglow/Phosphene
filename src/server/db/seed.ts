@@ -1,5 +1,9 @@
 import { and, eq, sql } from "drizzle-orm";
-import { PRESET_REWARDS, RETIRED_PRESET_REWARDS } from "../../shared/rewards";
+import {
+  LEGACY_PRESET_REWARD_COPY,
+  PRESET_REWARDS,
+  RETIRED_PRESET_REWARDS
+} from "../../shared/rewards";
 import { getDb } from "./client";
 import { achievements, appSettings, rewardItems, statistics } from "./schema";
 
@@ -46,6 +50,23 @@ export async function seedDatabase(): Promise<void> {
     .insert(rewardItems)
     .values(PRESET_REWARDS.map((reward) => ({ ...reward })))
     .onConflictDoNothing();
+
+  // Migrate exact built-in copy from older installations while preserving any
+  // text that the owner has customized.
+  for (const legacy of LEGACY_PRESET_REWARD_COPY) {
+    const current = PRESET_REWARDS.find((reward) => reward.id === legacy.id);
+    if (!current) continue;
+    await db
+      .update(rewardItems)
+      .set({ description: current.description, updatedAt: new Date() })
+      .where(
+        and(
+          eq(rewardItems.id, legacy.id),
+          eq(rewardItems.name, legacy.name),
+          eq(rewardItems.description, legacy.description)
+        )
+      );
+  }
 
   // Remove retired defaults from existing installations without touching a
   // reward that its owner has already customized into something else.
