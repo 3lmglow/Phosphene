@@ -3,6 +3,9 @@ packages:
 
 autoInstallPeers: false
 
+overrides:
+  fast-uri: 3.1.4
+
 allowBuilds:
   argon2: true
   esbuild: true
