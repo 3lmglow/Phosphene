@@ -1398,6 +1398,11 @@ svg {
 .state-message span { color: var(--ink-faint); font-size: 9px; }
 .state-message--waiting { color: #8a6938; background: #f7eedb; }
 .state-message--success { color: #53715c; background: #e9f2e8; }
+.state-message__review {
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .state-message--rejected {
   margin-bottom: 10px;
   color: #884f56;
@@ -1505,6 +1510,7 @@ svg {
 
 .submission-record__empty { color: var(--ink-faint); }
 .submission-record__review { color: #884f56; }
+.submission-record__review--approved { color: #52705c; }
 
 .proof-gallery {
   margin-top: 15px;

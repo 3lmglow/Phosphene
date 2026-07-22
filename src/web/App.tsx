@@ -825,6 +825,7 @@ function TaskDialog({
   }
   const latest = task.submissions?.[0];
   const rejectedSubmission = task.status === "pending" && latest?.status === "rejected" ? latest : null;
+  const approvedSubmission = task.status === "completed" && latest?.status === "approved" ? latest : null;
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog task-dialog" role="dialog" aria-modal="true" aria-label={task.title}>
@@ -907,7 +908,13 @@ function TaskDialog({
         {task.status === "completed" && (
           <div className="state-message state-message--success">
             <CheckCircle2 />
-            <div><strong>这件事已经被好好完成</strong><span>{task.completionDate} · 获得 {pointsFor(task)} 积分</span></div>
+            <div>
+              <strong>这件事已经被好好完成</strong>
+              <span>{task.completionDate} · 获得 {pointsFor(task)} 积分</span>
+              {approvedSubmission?.reviewReason?.trim() && (
+                <span className="state-message__review">通过说明：{approvedSubmission.reviewReason}</span>
+              )}
+            </div>
           </div>
         )}
         {task.submissions?.length ? <SubmissionHistory submissions={task.submissions} /> : null}
@@ -958,8 +965,10 @@ function SubmissionHistory({ submissions }: { submissions: NonNullable<Task["sub
               {!hasText && !hasImages && (
                 <p className="submission-record__empty">这次是直接确认完成，没有附加文字或图片。</p>
               )}
-              {submission.status === "rejected" && submission.reviewReason?.trim() && (
-                <p className="submission-record__review">打回理由：{submission.reviewReason}</p>
+              {["approved", "rejected"].includes(submission.status) && submission.reviewReason?.trim() && (
+                <p className={`submission-record__review submission-record__review--${submission.status}`}>
+                  {submission.status === "approved" ? "通过说明" : "打回理由"}：{submission.reviewReason}
+                </p>
               )}
             </article>
           );
