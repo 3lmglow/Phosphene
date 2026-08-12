@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@libsql/client": "0.17.4",
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "archiver": "8.0.0",
     "argon2": "0.41.1",
     "cookie-parser": "1.4.7",
@@ -39,12 +39,12 @@
     "helmet": "8.1.0",
     "lucide-react": "0.536.0",
     "multer": "2.2.0",
-    "nanoid": "5.1.5",
+    "nanoid": "5.1.16",
     "pino": "9.7.0",
     "pino-http": "10.5.0",
     "react": "19.1.1",
     "react-dom": "19.1.1",
-    "react-router-dom": "7.18.1",
+    "react-router-dom": "7.18.2",
     "sharp": "0.35.3",
     "yauzl": "3.4.0",
     "zod": "3.25.76"
