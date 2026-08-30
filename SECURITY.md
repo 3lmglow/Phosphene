@@ -1,38 +1,34 @@
-# Security
+# 安全说明
 
-Phosphene is designed for one private user and one AI connection per deployment. The supported
-production topology stores the SQLite database and private proof images on one persistent `/data`
-volume.
+Phosphene 面向一位用户和一位 AI 的私人实例。
 
-## Supported version
+## 部署检查
 
-Security fixes are provided for the latest 1.x release.
+- 为应用挂载私有持久卷，路径为 `/data`。
+- 使用 HTTPS 访问网站与 MCP。
+- 域名公开前完成首次设置，或设置私密的 `PHOSPHENE_SETUP_TOKEN`。
+- 公网实例保持 `PHOSPHENE_MCP_AUTH_MODE=token`。
+- 不通过静态文件服务暴露 `/data`。
+- 更新前创建卷快照并下载网站 ZIP。
+- 删除服务时确认是否保留持久卷；数据库和图片都在卷中。
 
-## Reporting a vulnerability
+## 凭据
 
-Do not open a public issue containing secrets, proof images, or exploit details. Contact the
-repository owner privately with the affected version, reproduction steps, and impact. Remove all
-real Phosphene data from the report.
+- AI Token 保存在可信 MCP 客户端或后端，不放进 URL、浏览器代码、日志、截图或公开仓库。
+- Webhook 签名密钥只保存在 Phosphene 与接收端。
+- Token 或密钥进入不可信位置后立即轮换。
+- 网站 ZIP 不包含登录密码、AI Token 或 Webhook 配置；整卷快照包含当前实例凭据，应作为私密备份保存。
 
-## Deployment checklist
+## 数据
 
-- By default, the first visitor who successfully submits the setup form claims the uninitialized
-  instance. Open the new deployment immediately and do not share its URL before setup is complete.
-- A random-looking hostname reduces casual discovery but is not an authentication boundary. Public
-  TLS hostnames can be discovered through
-  [Certificate Transparency](https://www.ietf.org/rfc/rfc9162.html) and other active scanning.
-- If the URL is already public, predictable, or cannot be claimed immediately, set a unique
-  `PHOSPHENE_SETUP_TOKEN` before exposing it. A value of at least 24 random characters is recommended.
-- Mount a private persistent volume at `/data`; do not use an ephemeral directory.
-- Keep the Phosphene website behind HTTPS.
-- Do not expose the contents of `/data` through a static file server.
-- Keep `PHOSPHENE_MCP_AUTH_MODE=token` on every public deployment. The `none` mode is only for an
-  isolated private network or same-device loopback connection.
-- Rotate the AI token immediately if it is copied into an untrusted client.
-- Never place an AI token in the MCP URL, browser-side JavaScript, logs, screenshots, or a public
-  repository. Use `Authorization: Bearer` or `X-Phosphene-MCP-Token` from a trusted client.
-- Export a Phosphene ZIP and enable persistent-volume snapshots before upgrading.
-- Until the documented ZIP restore issues are fixed, treat `/data` volume snapshots as the primary
-  disaster-recovery copy and restore only trusted, self-generated archives.
-- Treat deleting the service volume as a destructive operation: it contains both the database and
-  proof images.
+- 证据图片重新编码为 WebP，并移除 EXIF 与 GPS。
+- 图片和网站 ZIP 只通过需要认证的路由访问。
+- ZIP 恢复校验路径、大小、哈希、格式和像素，但仍应只恢复自己实例导出的备份。
+
+备份与恢复流程见 [docs/BACKUP.md](docs/BACKUP.md)。
+
+## 报告漏洞
+
+如果仓库的 Security 页面提供 **Report a vulnerability**，请使用 GitHub Private Vulnerability Report。若该入口不可用，可以在公开 issue 中只请求一个私密联络渠道，不附漏洞细节。
+
+私密报告中提供受影响版本、复现步骤与影响，并移除真实密码、Token、Cookie、任务文字和证据图片。普通问题继续使用公开 issue。

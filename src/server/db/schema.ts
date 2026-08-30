@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import {
   ACTORS,
+  DOMAIN_EVENT_TYPES,
   PROOF_REQUIREMENTS,
   RECURRENCE_MODES,
   REVEAL_MODES,
@@ -26,6 +27,7 @@ export type ProofRequirement = (typeof PROOF_REQUIREMENTS)[number];
 export type RecurrenceMode = (typeof RECURRENCE_MODES)[number];
 export type RevealMode = (typeof REVEAL_MODES)[number];
 export type Actor = (typeof ACTORS)[number];
+export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
 
 const SUBMISSION_STATUSES = ["pending", "approved", "rejected"] as const;
 const LEDGER_TYPES = [
@@ -38,6 +40,7 @@ const LEDGER_TYPES = [
   "correction"
 ] as const;
 const REDEMPTION_STATUSES = ["pending", "fulfilled", "cancelled"] as const;
+const WEBHOOK_DELIVERY_STATUSES = ["pending", "processing", "delivered", "dead_letter"] as const;
 const nowInMilliseconds = sql`(cast((julianday('now') - 2440587.5) * 86400000 as integer))`;
 const jsonArray = sql`'[]'`;
 const jsonObject = sql`'{}'`;
@@ -484,6 +487,7 @@ export const auditLogs = sqliteTable(
 export const idempotencyKeys = sqliteTable("idempotency_keys", {
   key: text("key").primaryKey(),
   operation: text("operation").notNull(),
+  requestHash: text("request_hash"),
   response: text("response", { mode: "json" })
     .$type<Record<string, unknown>>()
     .notNull(),
@@ -491,6 +495,89 @@ export const idempotencyKeys = sqliteTable("idempotency_keys", {
     .notNull()
     .default(nowInMilliseconds)
 });
+
+export const domainEvents = sqliteTable(
+  "domain_events",
+  {
+    sequence: integer("sequence").primaryKey({ autoIncrement: true }),
+    id: text("id").notNull(),
+    type: text("type", { enum: DOMAIN_EVENT_TYPES }).notNull(),
+    aggregateType: text("aggregate_type").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    actor: text("actor", { enum: ACTORS }).notNull(),
+    version: integer("version").notNull().default(1),
+    payload: text("payload", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(jsonObject),
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(nowInMilliseconds)
+  },
+  (table) => [
+    uniqueIndex("domain_events_id_idx").on(table.id),
+    uniqueIndex("domain_events_dedupe_idx").on(table.dedupeKey),
+    index("domain_events_type_sequence_idx").on(table.type, table.sequence),
+    index("domain_events_aggregate_idx").on(table.aggregateType, table.aggregateId),
+    check(
+      "domain_events_type_check",
+      sql`${table.type} in ('task.submitted', 'task.completed', 'redemption.created', 'notification.test')`
+    ),
+    check("domain_events_actor_check", sql`${table.actor} in ('AI', 'user', 'system')`),
+    check("domain_events_version_check", sql`${table.version} > 0`)
+  ]
+);
+
+export const webhookConfig = sqliteTable(
+  "webhook_config",
+  {
+    id: integer("id").primaryKey().default(1),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    url: text("url").notNull().default(""),
+    eventTypes: text("event_types", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["task.submitted","task.completed","redemption.created"]'`),
+    signingSecret: text("signing_secret").notNull(),
+    ...timestamps
+  },
+  (table) => [check("webhook_config_singleton_check", sql`${table.id} = 1`)]
+);
+
+export const webhookDeliveries = sqliteTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => domainEvents.id, { onDelete: "cascade" }),
+    status: text("status", { enum: WEBHOOK_DELIVERY_STATUSES })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(nowInMilliseconds),
+    leaseToken: text("lease_token"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+    lastAttemptAt: integer("last_attempt_at", { mode: "timestamp_ms" }),
+    deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    ...timestamps
+  },
+  (table) => [
+    uniqueIndex("webhook_deliveries_event_idx").on(table.eventId),
+    index("webhook_deliveries_ready_idx").on(table.status, table.nextAttemptAt),
+    index("webhook_deliveries_lease_idx").on(table.status, table.leaseExpiresAt),
+    check(
+      "webhook_deliveries_status_check",
+      sql`${table.status} in ('pending', 'processing', 'delivered', 'dead_letter')`
+    ),
+    check("webhook_deliveries_attempt_check", sql`${table.attemptCount} >= 0`)
+  ]
+);
 
 export const taskRelations = relations(tasks, ({ one, many }) => ({
   series: one(taskSeries, { fields: [tasks.seriesId], references: [taskSeries.id] }),
@@ -535,7 +622,23 @@ export const achievementUnlockRelations = relations(achievementUnlocks, ({ one }
   })
 }));
 
+export const domainEventRelations = relations(domainEvents, ({ one }) => ({
+  delivery: one(webhookDeliveries, {
+    fields: [domainEvents.id],
+    references: [webhookDeliveries.eventId]
+  })
+}));
+
+export const webhookDeliveryRelations = relations(webhookDeliveries, ({ one }) => ({
+  event: one(domainEvents, {
+    fields: [webhookDeliveries.eventId],
+    references: [domainEvents.id]
+  })
+}));
+
 export type TaskRow = typeof tasks.$inferSelect;
 export type SubmissionRow = typeof taskSubmissions.$inferSelect;
 export type SettingsRow = typeof appSettings.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
+export type DomainEventRow = typeof domainEvents.$inferSelect;
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;

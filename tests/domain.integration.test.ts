@@ -1,5 +1,7 @@
 import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { finished } from "node:stream/promises";
 import { ZipArchive, type ZipEntryData } from "archiver";
@@ -13,12 +15,17 @@ import { seedDatabase } from "../src/server/db/seed";
 import {
   appSettings,
   auditLogs,
+  dailyActivity,
+  domainEvents,
   pointLedger,
   proofAssets,
   rewardItems,
+  statistics,
   taskSeries,
   tasks,
-  userAccount
+  userAccount,
+  webhookConfig,
+  webhookDeliveries
 } from "../src/server/db/schema";
 import { addCalendarDays, localDate } from "../src/server/lib/dates";
 import { createId } from "../src/server/lib/ids";
@@ -37,6 +44,20 @@ import {
   submitTask,
   updateUserSettings
 } from "../src/server/services/domain";
+import {
+  claimWebhookDelivery,
+  createWebhookTestEvent,
+  getWebhookSettings,
+  markWebhookFailed,
+  retryWebhookDelivery,
+  rotateWebhookSecret,
+  updateWebhookSettings,
+  WEBHOOK_MAX_ATTEMPTS
+} from "../src/server/services/events";
+import {
+  deliverWebhookClaim,
+  signWebhookBody
+} from "../src/server/services/webhook-worker";
 import {
   beginApplicationRequest,
   exportBackupToFile,
@@ -143,6 +164,26 @@ describe.sequential("Phosphene domain integration", () => {
     const matches = result.items.filter((task: any) => task.title === input.title);
     expect(matches).toHaveLength(1);
     dailyTaskId = matches[0].id;
+  });
+
+  it("rejects reuse of an idempotency key with a different request payload", async () => {
+    const input = {
+      title: "Idempotency payload A",
+      description: "The original request",
+      type: "challenge" as const,
+      difficulty: "easy" as const,
+      base_points: 2,
+      verification_mode: "self" as const,
+      proof_requirement: "none" as const,
+      recurrence: "once" as const,
+      daily_deadline_time: "23:59",
+      reveal_mode: "immediate" as const,
+      idempotency_key: "integration-idempotency-payload"
+    };
+    await createTask(input);
+    await expect(
+      createTask({ ...input, title: "Idempotency payload B" })
+    ).rejects.toMatchObject({ code: "idempotency_payload_conflict" });
   });
 
   it("pauses today's pending recurring occurrence immediately and restores it on a timely resume", async () => {
@@ -313,6 +354,51 @@ describe.sequential("Phosphene domain integration", () => {
     expect((await getDb().query.tasks.findFirst({ where: eq(tasks.id, endedTaskId) }))?.status).toBe("pending");
   });
 
+  it("does not cancel a historical pending occurrence when repairing a paused series", async () => {
+    const seriesId = createId("series");
+    const historicalTaskId = createId("task");
+    const historicalDate = addCalendarDays(today, -2);
+    await getDb().insert(taskSeries).values({
+      id: seriesId,
+      title: "Paused series with historical work",
+      description: "Historical work remains visible for explicit handling",
+      difficulty: "easy",
+      basePoints: 3,
+      verificationMode: "ai_review",
+      proofRequirement: "text",
+      recurrence: "daily",
+      startDate: historicalDate,
+      nextOccurrenceDate: addCalendarDays(today, 1),
+      dailyDeadlineTime: "23:59",
+      active: false,
+      pausedAt: new Date(),
+      createdBy: "AI"
+    });
+    await getDb().insert(tasks).values({
+      id: historicalTaskId,
+      seriesId,
+      occurrenceDate: historicalDate,
+      title: "Historical pending occurrence",
+      description: "",
+      type: "daily",
+      difficulty: "easy",
+      basePoints: 3,
+      status: "pending",
+      verificationMode: "ai_review",
+      proofRequirement: "text",
+      createdBy: "AI",
+      source: "recurring",
+      revealMode: "immediate",
+      revealedAt: new Date(),
+      deadlineAt: new Date(Date.now() + 86_400_000)
+    });
+
+    await reconcileSystem();
+    expect(
+      (await getDb().query.tasks.findFirst({ where: eq(tasks.id, historicalTaskId) }))?.status
+    ).toBe("pending");
+  });
+
   it("requires and exposes a rejection reason with the rejected submission", async () => {
     const created = await createTask({
       title: "Review reason task",
@@ -409,6 +495,75 @@ describe.sequential("Phosphene domain integration", () => {
     expect(bonuses.some((entry: any) => entry.effectiveDate === today && entry.amount === 1)).toBe(true);
   });
 
+  it("does not rewrite derived statistics during a clean reconciliation", async () => {
+    await reconcileSystem();
+    const beforeStats = await getDb().query.statistics.findFirst({ where: eq(statistics.id, 1) });
+    const beforeActivity = await getDb().query.dailyActivity.findMany({
+      orderBy: (row: any, { asc }: any) => [asc(row.activityDate)]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(await reconcileSystem()).toMatchObject({ generated: 0, expired: 0, paused_cancelled: 0 });
+    const afterStats = await getDb().query.statistics.findFirst({ where: eq(statistics.id, 1) });
+    const afterActivity = await getDb().query.dailyActivity.findMany({
+      orderBy: (row: any, { asc }: any) => [asc(row.activityDate)]
+    });
+    expect(afterStats?.updatedAt.valueOf()).toBe(beforeStats?.updatedAt.valueOf());
+    expect(afterActivity.map((row: any) => row.updatedAt.valueOf())).toEqual(
+      beforeActivity.map((row: any) => row.updatedAt.valueOf())
+    );
+  });
+
+  it("paginates task and audit history without duplicating rows", async () => {
+    const taskIds = Array.from({ length: 13 }, () => createId("task"));
+    const paginationBase = Date.now() + 60_000;
+    await getDb().insert(tasks).values(taskIds.map((id, index) => ({
+      id,
+      title: `Pagination task ${index + 1}`,
+      description: "",
+      type: "challenge" as const,
+      difficulty: "easy" as const,
+      basePoints: 1,
+      status: "pending" as const,
+      verificationMode: "self" as const,
+      proofRequirement: "none" as const,
+      createdBy: "AI" as const,
+      revealMode: "immediate" as const,
+      revealedAt: new Date(paginationBase),
+      createdAt: new Date(paginationBase),
+      updatedAt: new Date(paginationBase)
+    })));
+    const firstTasks = await queryTasks({ status: "active", include_proof: false, limit: 7 });
+    const secondTasks = await queryTasks({
+      status: "active",
+      include_proof: false,
+      limit: 7,
+      cursor: firstTasks.next_cursor!
+    });
+    expect(firstTasks.next_cursor).toBeTruthy();
+    expect(secondTasks.items.length).toBeGreaterThan(0);
+    expect(new Set([...firstTasks.items, ...secondTasks.items].map((row: any) => row.id)).size)
+      .toBe(firstTasks.items.length + secondTasks.items.length);
+
+    await getDb().insert(auditLogs).values(Array.from({ length: 13 }, (_, index) => ({
+      id: createId("audit"),
+      actor: "system" as const,
+      action: "pagination.test",
+      entityType: "system",
+      summary: `Pagination audit ${index + 1}`,
+      createdAt: new Date(paginationBase)
+    })));
+    const firstAudit = await queryHistory({ kind: "audit", limit: 5 });
+    const secondAudit = await queryHistory({
+      kind: "audit",
+      limit: 5,
+      cursor: firstAudit.next_cursor as string
+    });
+    expect(firstAudit.next_cursor).toBeTruthy();
+    expect((secondAudit.audit as any[]).length).toBeGreaterThan(0);
+    expect(new Set([...(firstAudit.audit as any[]), ...(secondAudit.audit as any[])].map((row) => row.id)).size)
+      .toBe((firstAudit.audit as any[]).length + (secondAudit.audit as any[]).length);
+  });
+
   it("presents the two universal presets with the chosen label and retires old defaults", async () => {
     await getDb().update(appSettings).set({ aiLabel: "星沉" }).where(eq(appSettings.id, 1));
     await getDb()
@@ -437,6 +592,10 @@ describe.sequential("Phosphene domain integration", () => {
     expect(first.redemption.status).toBe("pending");
     expect(first.redemption.itemNameSnapshot).toBe("指定 星沉 写东西");
     expect((await getOverview()).statistics.balance).toBe(5);
+    const redemptionFeed = await queryHistory({ kind: "events", after_sequence: 0, limit: 100 });
+    expect((redemptionFeed.events as any[]).filter((event) =>
+      event.type === "redemption.created" && event.aggregateId === first.redemption.id
+    )).toHaveLength(1);
     await manageRewards({
       action: "fulfill_redemption",
       redemption_id: first.redemption.id,
@@ -702,6 +861,188 @@ describe.sequential("Phosphene domain integration", () => {
     expect((await getOverview()).statistics.balance).toBe(15);
   });
 
+  it("records durable task events and delivers signed Webhooks with retry state", async () => {
+    const requests: Array<{ body: string; headers: Record<string, string | string[] | undefined> }> = [];
+    let responseStatus = 204;
+    let responseDelayMs = 0;
+    const receiver = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      requests.push({ body: Buffer.concat(chunks).toString("utf8"), headers: { ...request.headers } });
+      if (responseDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
+      }
+      response.statusCode = responseStatus;
+      if (responseStatus === 503) response.setHeader("Retry-After", "1");
+      response.end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      receiver.once("error", onError);
+      receiver.listen(0, "127.0.0.1", () => {
+        receiver.off("error", onError);
+        resolve();
+      });
+    });
+    const address = receiver.address() as AddressInfo;
+    const url = `http://127.0.0.1:${address.port}/phosphene/events`;
+    try {
+      await updateWebhookSettings({
+        enabled: true,
+        url,
+        event_types: ["task.submitted", "task.completed", "redemption.created"]
+      });
+      const { signing_secret: signingSecret } = await rotateWebhookSecret();
+
+      const selfTask = await createTask({
+        title: "Webhook self completion",
+        description: "Emits a completion event",
+        type: "challenge",
+        difficulty: "easy",
+        base_points: 2,
+        verification_mode: "self",
+        proof_requirement: "none",
+        recurrence: "once",
+        daily_deadline_time: "23:59",
+        reveal_mode: "immediate",
+        idempotency_key: "integration-webhook-self-task"
+      });
+      if (selfTask.kind !== "task") throw new Error("Expected one-time self task");
+      await submitTask(selfTask.task.id, "", []);
+
+      const reviewTask = await createTask({
+        title: "Webhook review submission",
+        description: "Emits a submitted event",
+        type: "challenge",
+        difficulty: "easy",
+        base_points: 2,
+        verification_mode: "ai_review",
+        proof_requirement: "text",
+        recurrence: "once",
+        daily_deadline_time: "23:59",
+        reveal_mode: "immediate",
+        idempotency_key: "integration-webhook-review-task"
+      });
+      if (reviewTask.kind !== "task") throw new Error("Expected one-time review task");
+      await submitTask(reviewTask.task.id, "Evidence for AI review", []);
+      const approval = {
+        action: "review" as const,
+        task_id: reviewTask.task.id,
+        decision: "approve" as const,
+        idempotency_key: "integration-webhook-review-approval"
+      };
+      await manageTask(approval);
+      await manageTask(approval);
+
+      const feed = await queryHistory({ kind: "events", after_sequence: 0, limit: 100 });
+      expect((feed.events as any[]).some((event) =>
+        event.type === "task.completed" && event.aggregateId === selfTask.task.id
+      )).toBe(true);
+      expect((feed.events as any[]).some((event) =>
+        event.type === "task.submitted" && event.aggregateId === reviewTask.task.id
+      )).toBe(true);
+      expect((feed.events as any[]).filter((event) =>
+        event.type === "task.completed" && event.aggregateId === reviewTask.task.id
+      )).toHaveLength(1);
+      expect(feed.next_sequence).toBeGreaterThan(0);
+
+      for (let index = 0; index < 3; index += 1) {
+        const claim = await claimWebhookDelivery();
+        expect(claim).not.toBeNull();
+        await deliverWebhookClaim(claim!);
+      }
+      expect(requests).toHaveLength(3);
+      for (const request of requests) {
+        const eventId = String(request.headers["x-phosphene-event-id"]);
+        const timestamp = String(request.headers["x-phosphene-timestamp"]);
+        expect(request.headers["idempotency-key"]).toBe(eventId);
+        expect(request.headers["x-phosphene-signature"]).toBe(
+          `v1=${signWebhookBody(signingSecret, timestamp, request.body)}`
+        );
+        expect(JSON.parse(request.body)).toMatchObject({ id: eventId, version: 1 });
+      }
+      expect(
+        (await getDb().query.webhookDeliveries.findMany()).filter((row: any) => row.status === "delivered")
+      ).toHaveLength(3);
+
+      responseStatus = 503;
+      const testEvent = await createWebhookTestEvent();
+      const failedAt = Date.now();
+      const failedClaim = await claimWebhookDelivery();
+      expect(failedClaim?.event.id).toBe(testEvent.event_id);
+      await deliverWebhookClaim(failedClaim!);
+      const failed = await getDb().query.webhookDeliveries.findFirst({
+        where: eq(webhookDeliveries.id, failedClaim!.deliveryId)
+      });
+      expect(failed).toMatchObject({ status: "pending", attemptCount: 1, lastStatusCode: 503 });
+      expect(failed!.nextAttemptAt.valueOf()).toBeGreaterThanOrEqual(failedAt + 900);
+
+      const expiredAt = new Date(Date.now() - 1_000);
+      await getDb().update(webhookDeliveries).set({
+        status: "processing",
+        attemptCount: WEBHOOK_MAX_ATTEMPTS - 1,
+        leaseToken: "expired-test-lease",
+        leaseExpiresAt: expiredAt,
+        updatedAt: expiredAt
+      }).where(eq(webhookDeliveries.id, failedClaim!.deliveryId));
+      const reclaimed = await claimWebhookDelivery();
+      expect(reclaimed).toMatchObject({
+        deliveryId: failedClaim!.deliveryId,
+        attempt: WEBHOOK_MAX_ATTEMPTS
+      });
+      expect(reclaimed!.leaseToken).not.toBe("expired-test-lease");
+      expect(await markWebhookFailed(
+        reclaimed!.deliveryId,
+        reclaimed!.leaseToken,
+        "Terminal integration failure",
+        503
+      )).toMatchObject({ stale: false, status: "dead_letter" });
+      expect(await getDb().query.webhookDeliveries.findFirst({
+        where: eq(webhookDeliveries.id, failedClaim!.deliveryId)
+      })).toMatchObject({ status: "dead_letter", attemptCount: WEBHOOK_MAX_ATTEMPTS });
+
+      await retryWebhookDelivery(failedClaim!.deliveryId);
+      expect(await getDb().query.webhookDeliveries.findFirst({
+        where: eq(webhookDeliveries.id, failedClaim!.deliveryId)
+      })).toMatchObject({ status: "pending", attemptCount: 0, lastStatusCode: null });
+
+      responseStatus = 204;
+      responseDelayMs = 100;
+      const timeoutClaim = await claimWebhookDelivery();
+      expect(timeoutClaim?.deliveryId).toBe(failedClaim!.deliveryId);
+      await deliverWebhookClaim(timeoutClaim!, 25);
+      expect(await getDb().query.webhookDeliveries.findFirst({
+        where: eq(webhookDeliveries.id, failedClaim!.deliveryId)
+      })).toMatchObject({ status: "pending", attemptCount: 1, lastStatusCode: null });
+
+      responseDelayMs = 0;
+      const recoveredClaim = await claimWebhookDelivery(new Date(Date.now() + 6_000));
+      expect(recoveredClaim).toMatchObject({
+        deliveryId: timeoutClaim!.deliveryId,
+        attempt: 2
+      });
+      expect(recoveredClaim!.event.id).toBe(timeoutClaim!.event.id);
+      await deliverWebhookClaim(recoveredClaim!);
+      expect(
+        requests.slice(-2).map((request) => request.headers["x-phosphene-event-id"])
+      ).toEqual([timeoutClaim!.event.id, timeoutClaim!.event.id]);
+      expect(await getDb().query.webhookDeliveries.findFirst({
+        where: eq(webhookDeliveries.id, failedClaim!.deliveryId)
+      })).toMatchObject({ status: "delivered", attemptCount: 2, lastStatusCode: 204 });
+      expect((await getWebhookSettings()).deliveries).toMatchObject({ delivered: 4 });
+    } finally {
+      await updateWebhookSettings({
+        enabled: false,
+        url,
+        event_types: ["task.submitted", "task.completed", "redemption.created"]
+      }).catch(() => undefined);
+      await new Promise<void>((resolve, reject) => receiver.close((error) => error ? reject(error) : resolve()));
+    }
+    await expect(createWebhookTestEvent()).rejects.toMatchObject({ code: "webhook_disabled" });
+  });
+
   it("round-trips images and idempotency records through an in-place streamed backup", async () => {
     const sourceImage = await sharp({
       create: {
@@ -726,11 +1067,30 @@ describe.sequential("Phosphene domain integration", () => {
     await submitTask(legacyImageTaskId, "Legacy image proof", [stored]);
     const originalBefore = await getObject(stored.objectKey);
     const balanceBeforeBackup = (await getOverview()).statistics.balance;
+    await updateWebhookSettings({
+      enabled: false,
+      url: "https://backup-source.invalid/events",
+      event_types: ["task.completed"]
+    });
+    const eventsBeforeBackup = await getDb().select().from(domainEvents);
+    const deliveriesBeforeBackup = await getDb().select().from(webhookDeliveries);
     const backupPath = path.join(config.BACKUP_TEMP_PATH, "integration-backup.zip");
     await fs.rm(backupPath, { force: true });
     try {
       await exportBackupToFile(backupPath);
       expect((await fs.stat(backupPath)).size).toBeGreaterThan(0);
+      await updateWebhookSettings({
+        enabled: true,
+        url: "https://backup-target.invalid/events",
+        event_types: ["task.submitted", "redemption.created"]
+      });
+      const { signing_secret: targetSigningSecret } = await rotateWebhookSecret();
+      await createWebhookTestEvent();
+      await updateWebhookSettings({
+        enabled: false,
+        url: "https://backup-target.invalid/events",
+        event_types: ["task.submitted", "redemption.created"]
+      });
       await adjustPoints({
         kind: "bonus",
         amount: 99,
@@ -741,6 +1101,15 @@ describe.sequential("Phosphene domain integration", () => {
 
       await restoreBackupFromFile(backupPath);
       expect((await getOverview()).statistics.balance).toBe(balanceBeforeBackup);
+      expect(await getWebhookSettings()).toMatchObject({
+        enabled: false,
+        url: "https://backup-target.invalid/events",
+        event_types: ["task.submitted", "redemption.created"]
+      });
+      expect((await getDb().query.webhookConfig.findFirst({ where: eq(webhookConfig.id, 1) }))?.signingSecret)
+        .toBe(targetSigningSecret);
+      expect(await getDb().select().from(domainEvents)).toHaveLength(eventsBeforeBackup.length);
+      expect(await getDb().select().from(webhookDeliveries)).toHaveLength(deliveriesBeforeBackup.length);
       const restoredAsset = await getDb().query.proofAssets.findFirst({
         where: eq(proofAssets.id, stored.id)
       });

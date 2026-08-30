@@ -21,6 +21,10 @@ import {
   initializeStorage,
   pruneOrphanedProofFiles
 } from "./services/storage";
+import {
+  startWebhookWorker,
+  stopWebhookWorker
+} from "./services/webhook-worker";
 
 const logger = pino({
   level: config.LOG_LEVEL,
@@ -182,12 +186,26 @@ const server = app.listen(config.PORT, () => {
     "Phosphene is ready"
   );
 });
+startWebhookWorker(logger);
 
+let shuttingDown = false;
 async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info({ signal }, "Shutting down Phosphene");
-  server.close(async () => {
+  await stopWebhookWorker();
+  const forced = setTimeout(() => {
+    logger.error("Graceful shutdown timed out; closing remaining connections");
+    server.closeAllConnections();
+  }, 15_000);
+  forced.unref();
+  server.close(async (error) => {
+    clearTimeout(forced);
     await shutdownDatabase();
-    process.exit(0);
+    if (error) {
+      logger.error({ err: error }, "HTTP server shutdown failed");
+      process.exitCode = 1;
+    }
   });
 }
 

@@ -2,6 +2,7 @@ import {
   Activity,
   ArrowRight,
   Award,
+  BellRing,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -26,6 +27,7 @@ import {
   MoonStar,
   RotateCw,
   Save,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -999,16 +1001,33 @@ function proofLabel(value: string) {
 function TasksPage({ aiLabel }: { aiLabel: string }) {
   const [status, setStatus] = useState("active");
   const [type, setType] = useState("all");
+  const [additionalPages, setAdditionalPages] = useState<Array<{ items: Task[]; next_cursor: string | null }>>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   const query = useMemo(() => {
-    const params = new URLSearchParams({ limit: "100", include_proof: "false" });
-    if (status !== "all" && status !== "active") params.set("status", status);
+    const params = new URLSearchParams({ limit: "30", include_proof: "false" });
+    if (status !== "all") params.set("status", status);
     if (type !== "all") params.set("type", type);
     return params.toString();
   }, [status, type]);
-  const { data, error, loading, refresh } = useLoad<{ items: Task[] }>(() => api(`/tasks?${query}`), [query]);
-  const items = (data?.items ?? []).filter((task) =>
-    status === "active" ? ["pending", "submitted"].includes(task.status) : true
-  );
+  const { data, error, loading, refresh } = useLoad<{ items: Task[]; next_cursor: string | null }>(() => api(`/tasks?${query}`), [query]);
+  useEffect(() => setAdditionalPages([]), [query]);
+  const pages = data ? [data, ...additionalPages] : additionalPages;
+  const items = pages.flatMap((page) => page.items);
+  const nextCursor = pages.at(-1)?.next_cursor ?? null;
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api<{ items: Task[]; next_cursor: string | null }>(`/tasks?${query}&cursor=${encodeURIComponent(nextCursor)}`);
+      setAdditionalPages((current) => [...current, page]);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+  function taskChanged() {
+    setAdditionalPages([]);
+    void refresh();
+  }
   return (
     <div className="page">
       <PageHeader eyebrow="TASKS" title="所有约定" copy="一次性的认真、每天的照料，和不经意落下的惊喜。" />
@@ -1030,7 +1049,10 @@ function TasksPage({ aiLabel }: { aiLabel: string }) {
         </select>
       </div>
       {loading ? <PageLoader compact /> : error ? <PageError message={error} retry={refresh} /> : items.length ? (
-        <div className="task-grid">{items.map((task) => <TaskCard key={task.id} task={task} aiLabel={aiLabel} onChanged={refresh} />)}</div>
+        <>
+          <div className="task-grid">{items.map((task) => <TaskCard key={task.id} task={task} aiLabel={aiLabel} onChanged={taskChanged} />)}</div>
+          {nextCursor && <button className="button button--secondary pagination-action" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "继续整理中…" : "加载更多任务"}</button>}
+        </>
       ) : (
         <EmptyState icon={<ListTodo />} title="这个分类里还没有任务" copy={`换一个筛选条件看看，或者等待 ${aiLabel} 创建新的安排。`} />
       )}
@@ -1288,21 +1310,38 @@ const summarizedLedgerTypes = new Set(["task_reward", "task_penalty", "redemptio
 
 function HistoryPage({ aiLabel, userLabel }: { aiLabel: string; userLabel: string }) {
   const [kind, setKind] = useState("all");
-  const { data, loading, error, refresh } = useLoad<any>(() => api(`/history?kind=${kind}&limit=100`), [kind]);
+  const [additionalPages, setAdditionalPages] = useState<any[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const { data, loading, error, refresh } = useLoad<any>(() => api(`/history?kind=${kind}&limit=30`), [kind]);
+  useEffect(() => setAdditionalPages([]), [kind]);
+  const pages = data ? [data, ...additionalPages] : additionalPages;
   const events = useMemo(() => {
-    if (!data) return [];
-    if (kind === "points") return (data.points ?? []).map((item: any) => ({ ...item, eventKind: "points", date: item.createdAt }));
-    if (kind === "tasks") return (data.tasks ?? []).map((item: any) => ({ ...item, eventKind: "tasks", date: item.updatedAt }));
-    if (kind === "redemptions") return (data.redemptions ?? []).map((item: any) => ({ ...item, eventKind: "redemptions", date: item.redeemedAt }));
-    if (kind === "audit") return (data.audit ?? []).map((item: any) => ({ ...item, eventKind: "audit", date: item.createdAt }));
-    return [
-      ...(data.points ?? [])
-        .filter((item: any) => !summarizedLedgerTypes.has(item.type))
-        .map((item: any) => ({ ...item, eventKind: "points", date: item.createdAt })),
-      ...(data.tasks ?? []).map((item: any) => ({ ...item, eventKind: "tasks", date: item.updatedAt })),
-      ...(data.redemptions ?? []).map((item: any) => ({ ...item, eventKind: "redemptions", date: item.redeemedAt }))
-    ].sort((a, b) => +new Date(b.date) - +new Date(a.date)).slice(0, 100);
-  }, [data, kind]);
+    return pages.flatMap((page) => {
+      if (kind === "points") return (page.points ?? []).map((item: any) => ({ ...item, eventKind: "points", date: item.createdAt }));
+      if (kind === "tasks") return (page.tasks ?? []).map((item: any) => ({ ...item, eventKind: "tasks", date: item.updatedAt }));
+      if (kind === "redemptions") return (page.redemptions ?? []).map((item: any) => ({ ...item, eventKind: "redemptions", date: item.redeemedAt }));
+      if (kind === "audit") return (page.audit ?? []).map((item: any) => ({ ...item, eventKind: "audit", date: item.createdAt }));
+      if (page.timeline) return page.timeline;
+      return [
+        ...(page.points ?? [])
+          .filter((item: any) => !summarizedLedgerTypes.has(item.type))
+          .map((item: any) => ({ ...item, eventKind: "points", date: item.createdAt })),
+        ...(page.tasks ?? []).map((item: any) => ({ ...item, eventKind: "tasks", date: item.updatedAt })),
+        ...(page.redemptions ?? []).map((item: any) => ({ ...item, eventKind: "redemptions", date: item.redeemedAt }))
+      ].sort((a, b) => +new Date(b.date) - +new Date(a.date));
+    });
+  }, [pages, kind]);
+  const lastPage = pages.at(-1);
+  async function loadMoreHistory() {
+    if (!lastPage?.has_more || !lastPage.next_cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api(`/history?kind=${kind}&limit=30&cursor=${encodeURIComponent(lastPage.next_cursor)}`);
+      setAdditionalPages((current) => [...current, page]);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
   return (
     <div className="page">
       <PageHeader eyebrow="HISTORY" title="每一次发生，都有迹可循" copy="积分不会被悄悄改写，任务也不会无声消失。这里保留完整的时间线。" />
@@ -1323,6 +1362,7 @@ function HistoryPage({ aiLabel, userLabel }: { aiLabel: string; userLabel: strin
             />
           )) :
             <EmptyState icon={<History />} title="时间线还是空的" copy="完成任务、获得积分或兑换奖励后，记录会出现在这里。" />}
+          {lastPage?.has_more && lastPage.next_cursor && <button className="button button--secondary pagination-action" disabled={loadingMore} onClick={() => void loadMoreHistory()}>{loadingMore ? "继续整理中…" : "加载更早记录"}</button>}
         </div>
       )}
     </div>
@@ -1474,6 +1514,7 @@ function SettingsPage({
             ["identity", <CircleUserRound />, "称呼与时间"],
             ["boundaries", <ShieldCheck />, "边界与惩罚"],
             ["connection", <KeyRound />, "AI 连接"],
+            ["notifications", <BellRing />, "完成通知"],
             ["data", <Upload />, "数据与备份"],
             ["security", <LockKeyhole />, "登录安全"]
           ].map(([value, icon, label]) => (
@@ -1496,6 +1537,7 @@ function SettingsPage({
               )}
               {tab === "boundaries" && <BoundarySettings value={settings.data} onSaved={settings.refresh} />}
               {tab === "connection" && <ConnectionSettings tokens={tokens.data ?? []} onChanged={tokens.refresh} />}
+              {tab === "notifications" && <WebhookSettings />}
               {tab === "data" && (
                 <DataSettings
                   installAvailable={installAvailable}
@@ -1627,6 +1669,166 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
       <button className="button button--secondary" onClick={rotate} disabled={busy}><RotateCw size={17} />{busy ? "轮换中…" : "轮换 AI Token"}</button>
       <div className="tool-count"><Sparkles /><div><strong>精简为恰好 7 个工具</strong><span>创建、查询、管理任务，概览、历史、奖励和积分调整。</span></div></div>
     </div>
+  );
+}
+
+const webhookEventOptions = [
+  ["task.submitted", "任务已提交", "AI 审核任务收到新证据时通知"],
+  ["task.completed", "任务已完成", "自助完成或 AI 审核通过后通知"],
+  ["redemption.created", "奖励已兑换", "用户提交奖励兑换后通知"]
+] as const;
+
+const webhookDeliveryLabel: Record<string, string> = {
+  pending: "等待投递",
+  processing: "正在投递",
+  delivered: "已送达",
+  dead_letter: "已停止重试"
+};
+
+function WebhookSettings() {
+  const settings = useLoad<any>(() => api("/notifications/webhook"), []);
+  const deliveries = useLoad<any[]>(() => api("/notifications/webhook/deliveries?limit=12"), []);
+  if (settings.loading && !settings.data) return <PageLoader compact />;
+  if (!settings.data) return <PageError message={settings.error} retry={settings.refresh} />;
+  return (
+    <WebhookSettingsForm
+      value={settings.data}
+      deliveries={deliveries.data ?? []}
+      deliveriesLoading={deliveries.loading}
+      onSettingsChanged={settings.refresh}
+      onDeliveriesChanged={deliveries.refresh}
+    />
+  );
+}
+
+function WebhookSettingsForm({
+  value,
+  deliveries,
+  deliveriesLoading,
+  onSettingsChanged,
+  onDeliveriesChanged
+}: {
+  value: any;
+  deliveries: any[];
+  deliveriesLoading: boolean;
+  onSettingsChanged: () => void;
+  onDeliveriesChanged: () => void;
+}) {
+  const [form, setForm] = useState({
+    enabled: Boolean(value.enabled),
+    url: String(value.url ?? ""),
+    event_types: Array.isArray(value.event_types) ? value.event_types : []
+  });
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [secret, setSecret] = useState("");
+
+  function toggleEvent(type: string, checked: boolean) {
+    setForm((current) => ({
+      ...current,
+      event_types: checked
+        ? [...new Set([...current.event_types, type])]
+        : current.event_types.filter((item: string) => item !== type)
+    }));
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy("save");
+    setMessage("");
+    try {
+      await api("/notifications/webhook", {
+        method: "PUT",
+        body: { ...form, url: form.url.trim() }
+      });
+      setMessage("通知设置已保存。新发生的事件会按这里的订阅进入投递队列。");
+      onSettingsChanged();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "通知设置保存失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function rotateSecret() {
+    if (!confirm("轮换后，接收端必须改用新密钥验证后续通知。继续吗？")) return;
+    setBusy("secret");
+    setMessage("");
+    try {
+      const result = await api<{ signing_secret: string }>("/notifications/webhook/rotate-secret", { method: "POST" });
+      setSecret(result.signing_secret);
+      setMessage("签名密钥已轮换。请现在复制到接收端；离开本页后不会再次显示。");
+      onSettingsChanged();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "签名密钥轮换失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sendTest() {
+    setBusy("test");
+    setMessage("");
+    try {
+      await api("/notifications/webhook/test", { method: "POST" });
+      setMessage("测试事件已进入可靠投递队列。可在下方查看结果。");
+      await onDeliveriesChanged();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "测试通知入队失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function retryDelivery(deliveryId: string) {
+    setBusy(deliveryId);
+    setMessage("");
+    try {
+      await api(`/notifications/webhook/deliveries/${deliveryId}/retry`, { method: "POST" });
+      setMessage("这次投递已经重新排队。");
+      await onDeliveriesChanged();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "重新排队失败。");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <form className="settings-form" onSubmit={save}>
+      <div className="settings-title"><div><h2>完成通知</h2><p>Phosphene 会在业务事务提交时记下事件，再由后台可靠投递。接收端应按事件 ID 去重，并验证 HMAC 签名。</p></div></div>
+      <div className="boundary-callout"><BellRing /><div><strong>给 AI 一条及时醒来的路</strong><span>Webhook 是主动通知；不支持入站通知的 AI 仍可用 query_history(events) 按 sequence 游标订阅。</span></div></div>
+      <Field label="Webhook 地址" hint="仅接受 http:// 或 https://，不会跟随重定向">
+        <input type="url" maxLength={2048} placeholder="https://example.com/phosphene/events" value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} />
+      </Field>
+      <label className="switch-row"><div><strong>启用主动通知</strong><span>关闭后仍会保留可查询的领域事件，但不会为新事件创建投递</span></div><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /><i /></label>
+      <div className="webhook-event-list">
+        {webhookEventOptions.map(([type, label, copy]) => (
+          <label key={type}>
+            <input type="checkbox" checked={form.event_types.includes(type)} onChange={(event) => toggleEvent(type, event.target.checked)} />
+            <span><strong>{label}</strong><small>{copy}</small></span>
+            <code>{type}</code>
+          </label>
+        ))}
+      </div>
+      {message && <div className="notice-banner"><BellRing />{message}</div>}
+      {secret && <div className="one-time-secret"><strong>新签名密钥只显示这一次</strong><SecretBox value={secret} /></div>}
+      <div className="webhook-actions">
+        <button className="button button--primary" disabled={Boolean(busy)}><Save size={17} />{busy === "save" ? "保存中…" : "保存通知设置"}</button>
+        <button className="button button--secondary" type="button" disabled={Boolean(busy)} onClick={() => void rotateSecret()}><RotateCw size={17} />{busy === "secret" ? "轮换中…" : "轮换签名密钥"}</button>
+        <button className="button button--secondary" type="button" disabled={Boolean(busy) || !form.enabled || !form.url.trim()} onClick={() => void sendTest()}><Send size={17} />{busy === "test" ? "正在入队…" : "发送测试事件"}</button>
+      </div>
+      <section className="webhook-deliveries">
+        <div><strong>最近投递</strong><button type="button" onClick={onDeliveriesChanged} disabled={deliveriesLoading}><RotateCw />刷新</button></div>
+        {deliveriesLoading && !deliveries.length ? <span>正在读取投递状态…</span> : deliveries.length ? deliveries.map((delivery) => (
+          <article key={delivery.id}>
+            <i className={`delivery-state delivery-state--${delivery.status}`} />
+            <div><strong>{webhookDeliveryLabel[delivery.status] ?? delivery.status}</strong><span>{delivery.event?.type ?? "事件"} · {formatDate(delivery.createdAt, true)} · 已尝试 {delivery.attemptCount} 次</span>{delivery.lastError && <small>{delivery.lastError}</small>}</div>
+            {delivery.status === "dead_letter" && <button className="button button--small" type="button" disabled={busy === delivery.id} onClick={() => void retryDelivery(delivery.id)}>{busy === delivery.id ? "排队中…" : "重试"}</button>}
+          </article>
+        )) : <span>还没有投递记录。保存并启用后，可以先发送一次测试事件。</span>}
+      </section>
+    </form>
   );
 }
 

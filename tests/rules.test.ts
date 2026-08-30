@@ -5,7 +5,12 @@ import {
   TIMEZONE_OPTIONS,
   streakBonusForDay
 } from "../src/shared/constants";
-import { createTaskSchema, manageTaskSchema, taskQuerySchema } from "../src/shared/schemas";
+import {
+  createTaskSchema,
+  manageTaskSchema,
+  taskQuerySchema,
+  webhookSettingsSchema
+} from "../src/shared/schemas";
 import { addCalendarDays, localDate, localDateTime } from "../src/server/lib/dates";
 import { resolveDeployment } from "../src/server/lib/deployment";
 
@@ -85,6 +90,54 @@ describe("timezone-safe calendar helpers", () => {
         idempotency_key: "approve-without-reason"
       })
     ).not.toThrow();
+  });
+
+  it("rejects contradictory task lifecycle fields before they reach the database", () => {
+    const base = {
+      title: "Lifecycle validation",
+      type: "challenge" as const,
+      difficulty: "easy" as const,
+      base_points: 1,
+      verification_mode: "self" as const,
+      proof_requirement: "none" as const,
+      recurrence: "once" as const,
+      daily_deadline_time: "23:59",
+      reveal_mode: "immediate" as const,
+      idempotency_key: "lifecycle-validation"
+    };
+    expect(() => createTaskSchema.parse({ ...base, start_date: "2026-08-30" }))
+      .toThrow(/一次性任务/);
+    expect(() => createTaskSchema.parse({
+      ...base,
+      type: "daily",
+      recurrence: "daily",
+      start_date: "2026-08-30",
+      reveal_mode: "next_visit"
+    })).toThrow(/固定立即展示/);
+    expect(() => createTaskSchema.parse({
+      ...base,
+      reveal_mode: "at_time",
+      visible_at: "2026-08-31T10:00:00+08:00",
+      deadline: "2026-08-31T09:00:00+08:00"
+    })).toThrow(/截止时间之前揭晓/);
+  });
+
+  it("validates Webhook subscriptions independently from AI credentials", () => {
+    expect(() => webhookSettingsSchema.parse({
+      enabled: true,
+      url: "",
+      event_types: ["task.completed"]
+    })).toThrow(/地址/);
+    expect(() => webhookSettingsSchema.parse({
+      enabled: true,
+      url: "https://user:secret@example.com/events",
+      event_types: ["task.completed"]
+    })).toThrow();
+    expect(() => webhookSettingsSchema.parse({
+      enabled: true,
+      url: "https://example.com/events",
+      event_types: ["notification.test"]
+    })).toThrow();
   });
 });
 

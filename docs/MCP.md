@@ -1,48 +1,78 @@
-# Phosphene MCP 使用说明
+# MCP 连接与工具
 
-## 服务入口
+MCP 让现有 AI 客户端调用 Phosphene 的任务、积分与奖励能力。Phosphene 自身不运行 AI 模型。
 
-Phosphene 使用无状态 Streamable HTTP，所有七个工具都位于：
+## 连接信息
 
-```text
-https://YOUR_DOMAIN/mcp
-```
+在网站“设置 → AI 连接”中取得：
 
-同一个 Endpoint 接受初始化与后续工具请求。服务端不需要 MCP Session ID，客户端也不应
-另外添加 `/sse`、`/mcp-extra` 或工具专属路径。默认鉴权模式始终是 `token`，升级不会改变
-既有连接。
+- Endpoint：`https://你的域名/mcp`
+- AI Token：首次设置或轮换后只显示一次
 
-## 静态 Token
-
-Token 在首次设置或网站“设置 → AI 连接”中生成，只显示一次。以下两种请求头任选一个：
+Transport 选择 **Streamable HTTP**，并发送：
 
 ```http
 Authorization: Bearer phosphene_ai_你的完整Token
 ```
 
+也可以使用：
+
 ```http
 X-Phosphene-MCP-Token: phosphene_ai_你的完整Token
 ```
 
-如果同时发送，两个 Token 必须一致。服务器日志会清除这两个 Header；Token 仍然不能进入
-URL、浏览器前端变量、公开仓库或截图。
+两种 Header 权限相同，选一个即可。Token 保存在 AI 客户端的私密配置或环境变量中，不写入 URL 或仓库。
 
-调用方推荐保存：
+连接后先调用 `get_overview`。成功返回称呼、时区、余额和当前队列，就表示 URL、Token 与 Transport 都正确。
+
+## 通用配置
+
+```json
+{
+  "mcpServers": {
+    "phosphene": {
+      "type": "http",
+      "url": "https://YOUR_DOMAIN/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_AI_TOKEN"
+      }
+    }
+  }
+}
+```
+
+客户端支持从环境变量读取 Bearer Token 时，优先让配置引用环境变量，而不是把 Token 直接写进配置文件。
+
+### Codex
+
+先把 Token 保存为本机环境变量，再添加远程 MCP：
+
+```text
+codex mcp add phosphene --url https://YOUR_DOMAIN/mcp --bearer-token-env-var PHOSPHENE_AI_TOKEN
+```
+
+重新启动 Codex 后，调用 Phosphene 的 `get_overview` 做一次验证。
+
+### Claude Code
+
+```text
+claude mcp add --transport http phosphene https://YOUR_DOMAIN/mcp --header "Authorization: Bearer YOUR_AI_TOKEN"
+```
+
+### 自建 AI 后端
+
+调用层可以保存：
 
 ```env
 PHOSPHENE_MCP_URL=https://YOUR_DOMAIN/mcp
 PHOSPHENE_MCP_TOKEN=phosphene_ai_你的完整Token
 ```
 
-再由调用方拼接 `Authorization: Bearer ${PHOSPHENE_MCP_TOKEN}`。这些不是 Phosphene
-服务端环境变量。
+由服务端在请求中组成 Authorization Header。浏览器前端不应直接持有 AI Token。
 
-## stdio 转接
+## 只支持 stdio 的客户端
 
-`dist/server/stdio-bridge.js` 是本地传输适配器。它对桌面客户端暴露 stdio，对 Phosphene
-服务仍使用上述 Streamable HTTP，因此权限、审计、Token 轮换和数据源均保持一致。
-
-构建仓库后使用：
+仓库构建产物包含 `dist/server/stdio-bridge.js`。客户端通过 stdio 启动它，转接器再连接远程 Phosphene：
 
 ```json
 {
@@ -59,158 +89,141 @@ PHOSPHENE_MCP_TOKEN=phosphene_ai_你的完整Token
 }
 ```
 
-转接器会透传工具 JSON Schema、文字结果、结构化结果和图片内容。URL 只有 origin 时自动
-补 `/mcp`；出于泄漏风险，含用户名、密码、查询参数或 fragment 的 URL 会被拒绝。
+使用前在仓库中运行：
 
-## 可选免鉴权
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+```
 
-仅当调用方与 Phosphene 同机或位于隔离的可信网络，而且客户端无法添加任何 Header 时，
-在 Phosphene 服务端设置：
+转接器只转换传输方式，权限、审计和数据仍由远程 Phosphene 服务处理。
+
+## 工具一览
+
+| 工具 | 作用 |
+| --- | --- |
+| `create_task` | 创建一次性任务或每日重复任务 |
+| `query_tasks` | 按条件查询任务，并读取提交与证据 |
+| `manage_task` | 编辑、取消、判定失败、审核以及暂停或恢复系列 |
+| `get_overview` | 读取积分、连击、统计、边界和当前队列 |
+| `query_history` | 查询任务、积分、兑换、审计或领域事件 |
+| `manage_rewards` | 管理奖励、查询兑换并标记履行 |
+| `adjust_points` | 发放奖励、执行允许范围内的扣分或账本校正 |
+
+用户提交任务、上传图片、兑换奖励和修改设置通过网站完成。
+
+## 工具行为
+
+### `create_task`
+
+- `daily` 可以使用 `recurrence: once | daily`
+- `challenge` 是一次性任务，并使用带时区偏移的 `deadline`
+- `surprise` 可以在下次访问或指定 `visible_at` 时揭晓
+- 新任务的证据要求使用 `none | text | text_and_image`
+- 每日重复任务使用 `start_date`、可选 `end_date` 与 `daily_deadline_time`
+
+创建重复任务会返回 `series_id`；当天位于有效日期范围内时，也会返回当天任务。
+
+### `query_tasks`
+
+支持按任务 id、状态、类型、日期与 cursor 查询。AI 可以看见尚未向用户揭晓的 surprise。
+
+`include_proof: true` 会返回每次提交的文字、状态、驳回理由和图片元数据，并把私有审核预览作为 MCP image content 返回。
+
+### `manage_task`
+
+| action | 行为 |
+| --- | --- |
+| `edit` | 编辑仍在等待完成的任务 |
+| `cancel` | 取消任务，不扣分 |
+| `fail` | 判定失败并按规则扣分 |
+| `review` | 批准或驳回待审核提交 |
+| `pause_series` | 暂停每日重复系列 |
+| `resume_series` | 恢复每日重复系列 |
+
+驳回时提供明确的 `reason`。暂停系列会移除当天尚未提交的任务，不撤销已提交、已完成或历史记录。
+
+重复任务的编辑、取消与失败可以选择当前 occurrence，或当前及未来任务。
+
+### `get_overview`
+
+返回：
+
+- 双方称呼与用户时区
+- 余额、累计获得/消费/扣除
+- 当前与最长连击
+- 总坚持天数和完成统计
+- 今日状态、待完成、待审核与待履行数量
+- 用户边界和最近成就
+
+在创建带日期或“今天/明天”语义的任务前读取这里的时区。
+
+### `query_history`
+
+`kind` 支持：
+
+- `tasks`
+- `points`
+- `redemptions`
+- `audit`
+- `events`
+- `all`
+
+事件模式用于没有入站 Webhook 的 AI 宿主。消费者从 `after_sequence: 0` 开始，按顺序逐条处理；每个事件成功后保存该事件的 `sequence`。整页处理完成时，该值应等于响应的 `next_sequence`。完整流程见 [完成通知](WEBHOOKS.md)。
+
+### `manage_rewards`
+
+支持列出、新建、修改、归档和恢复奖励，也可以查询兑换并在真正兑现后标记为已履行。
+
+用户点击兑换时积分立即扣除，兑换保持 pending，直到 AI 完成约定。AI 不能替用户发起兑换。
+
+### `adjust_points`
+
+- `bonus`：额外奖励
+- `penalty`：用户允许范围内的扣分
+- `correction`：账本校正
+
+`reason` 会显示在用户可见的积分历史中。penalty 服从惩罚暂停、每日上限和余额下限。
+
+## 幂等键
+
+所有写操作都要求 `idempotency_key`，长度为 8–128 个字符。
+
+```text
+task-20260830-bedtime-water-v1
+review-task_xxx-attempt-1
+reward-create-song-v1
+```
+
+同一次意图因网络问题重试时复用原 key。新的意图使用新的 key。同一 key 若对应不同操作或不同请求内容，服务端会返回冲突。
+
+## 给 AI 的上下文建议
+
+连接 Phosphene 时，告诉 AI：
+
+1. 创建带日期的任务前先读取 `get_overview` 中的称呼、时区和用户边界。
+2. 审核队列使用 `query_tasks(status="submitted", include_proof=true)`。
+3. 写操作使用稳定幂等键，重试同一意图时复用。
+4. 奖励只能由用户兑换；AI 在实际兑现后标记履行。
+5. 若要主动获知新提交与完成事件，按 [完成通知](WEBHOOKS.md) 选择 Webhook 或事件轮询。
+
+## 兼容性与排错
+
+- 浏览器打开 `/mcp` 返回 405 是正常的；Streamable HTTP 通过 POST 工作。
+- 健康检查访问 `/healthz`。
+- 401 通常来自 Token 缺失、复制不完整或轮换后仍使用旧 Token。
+- 已连接但没有工具时，检查 URL 是否以 `/mcp` 结尾、Transport 是否为 Streamable HTTP。
+- 只支持旧 SSE 的客户端不能直接连接当前 Endpoint。
+- Claude.ai 远程自定义连接器通常要求 OAuth；Phosphene 当前提供静态 Token，不包含 OAuth 授权服务器。
+
+更多症状见 [故障排查](TROUBLESHOOTING.md)。
+
+## 无 Header 的可信本地客户端
+
+调用方与 Phosphene 位于同一设备或隔离私网、且客户端完全不能发送 Header 时，可以在服务端设置：
 
 ```env
 PHOSPHENE_MCP_AUTH_MODE=none
 ```
 
-该值需要重启进程才会生效。默认值 `token` 不变；切回 `token` 后之前未撤销的 AI Token
-继续有效。公网实例、可被他人访问的局域网和浏览器 JavaScript 均不应使用 `none`。
-
-## 客户端速查
-
-### Claude Code
-
-```bash
-claude mcp add --transport http phosphene https://YOUR_DOMAIN/mcp \
-  --header "Authorization: Bearer YOUR_AI_TOKEN"
-```
-
-### 自建 AI 后端
-
-使用服务端环境变量保存 URL 与原始 Token，请求时添加任一受支持 Header。不要在浏览器
-bundle 中注入凭证，也不要为跨域浏览器直连打开宽泛 CORS。
-
-### Operit / Android 本地桥
-
-- 同机 URL 使用 `http://127.0.0.1:PORT/mcp`
-- transport 选择 Streamable HTTP
-- 能发送 Header 就保留 `token`
-- 完全不能发送 Header 时，只在同机回环使用 `none`
-- 远程 Zeabur URL 必须使用 HTTPS 与 Token
-
-### Claude.ai 与 Claude 手机端
-
-Phosphene 尚未实现 OAuth 2.1 授权服务器，因此不把静态 Token 模式描述成 Claude.ai
-远程连接器兼容。将公网服务改为 `none` 虽可能绕过认证步骤，却会同时取消全部 MCP 访问
-控制，不属于安全方案。
-
-## 握手排错
-
-| 现象 | 检查项 |
-| --- | --- |
-| `401 ai_token_required` | Header 名是否正确，Bearer 后是否有一个空格 |
-| `401 invalid_ai_token` | Token 是否复制完整、已轮换或撤销 |
-| `401 conflicting_ai_token` | 不要同时发送不同的 Authorization 与专用 Header |
-| 没有工具 | URL 是否以 `/mcp` 结尾，客户端是否真的使用 Streamable HTTP |
-| stdio 启动即退出 | 本机是否已构建，以及两个 `PHOSPHENE_MCP_*` 调用方变量是否存在 |
-| 安卓客户端一直等待 | 改用 `127.0.0.1`，核对端口和 transport；旧 SSE-only 客户端需升级 |
-
-GET `/mcp` 返回 405 是无状态 Streamable HTTP Endpoint 的正常行为；实际 MCP 消息通过
-POST 发送。健康检查应访问 `/healthz`，不要用浏览器直接打开 `/mcp` 判断是否可用。
-
-## 推荐系统提示
-
-```text
-你连接了用户自托管的 Phosphene。
-
-创建或管理带日期的任务前先读取 get_overview 中的称呼、时区和队列，并尊重用户设置的
-允许内容、禁止内容、惩罚暂停状态与每日扣分上限。只在有明确理由时创建任务，避免用大量
-任务制造压力。
-
-如果 punishments_paused=true，不要调用 manage_task(action="fail") 或
-adjust_points(kind="penalty")；服务端也会拒绝这两类 AI 主动惩罚。任务失败扣分与手动 AI
-扣分共用每日上限，系统自动逾期不占用这项额度。
-
-所有写操作都使用稳定且唯一的 idempotency_key；同一次意图的网络重试必须复用原 key，
-新意图必须使用新 key。
-
-需要 AI 确认的任务通过 query_tasks(status="submitted", include_proof=true) 审核。
-新任务的 `proof_requirement` 只使用 `none | text | text_and_image`，不要创建纯图片或
-“文字/图片二选一”的任务。图片会作为 MCP image content 一并返回；若当前 AI 客户端不能
-渲染图片，应依据同时提交的文字判断，不得臆测图片内容。只有证据足够时才 approve；
-reject 时给出清楚、不羞辱用户的 reason。
-
-不要替用户兑换奖励，不要尝试修改用户边界，也不要把 Phosphene 数据发到其他服务。
-```
-
-## 工具契约
-
-### create_task
-
-仅 `daily` 可使用 `recurrence: daily`。Challenge 必须提供带时区偏移的 `deadline`。
-Surprise 通常使用 `reveal_mode: next_visit`；定时揭晓使用 `at_time` + `visible_at`。
-AI 可用的证据要求固定为 `none | text | text_and_image`。这一限制只影响新建任务，
-已有 `image` 或 `text_or_image` 任务仍可正常提交和审核。
-
-重复 daily 使用 `start_date`、可选 `end_date` 和 `daily_deadline_time`。创建结果返回
-`series_id`，当天在有效范围内时还会返回首个任务实例。
-
-### query_tasks
-
-支持按 id、状态、类型、日期和 cursor 查询。AI 可以看见尚未向 user 揭晓的 surprise。
-`include_proof: true` 会返回提交元数据（包括审核状态与打回理由），并把最多 12 张私有预览
-作为 MCP image content 返回。
-
-### manage_task
-
-- `edit`：只允许待完成任务
-- `cancel`：取消，不扣分
-- `fail`：判定失败并按任务规则扣分；服从 user 的惩罚暂停，并与手动 AI 扣分共用每日上限
-- `review`：approve 或 reject 待审核提交；reject 必须填写明确、可执行的 `reason`
-- `pause_series` / `resume_series`：暂停或恢复重复 daily。暂停立即取消当天尚未提交的实例，
-  但不撤销已提交、已完成或历史记录；当天截止前恢复时会恢复由暂停取消的当日实例
-
-重复任务的 edit/cancel/fail 可选择 `occurrence` 或 `this_and_future`。
-
-### get_overview
-
-返回余额、累计获得/消费/扣除、当前/最长连击、总坚持天数、总完成数、分类统计、今日状态、
-待完成数、待审核数、待履行兑换、最近成就、显示称呼和时区。
-
-时区只在调用 `get_overview` 时作为一个小字段返回，并不会被附加到每次工具调用。积分、
-连击和逾期结算始终由服务端负责；AI 只需在创建截止时间、定时惊喜或理解“今天/明天”时
-使用它。
-
-### query_history
-
-`kind` 为 `all | tasks | points | redemptions | audit`。不要用历史接口轮询任务状态；
-审核队列使用 `query_tasks(status="submitted")`。
-
-### manage_rewards
-
-AI 可列出、新建、修改、归档、恢复奖励，查询兑换并标记履行。归档会把项目从 user
-兑换页移除但保留历史，`restore` 可重新上架。预设只是初始内容，自定义奖励
-不需要增加新的 MCP 工具。AI 不能主动替 user 消费。user 兑换后积分会立即扣除，兑换先
-保持 `pending`；奖励真正兑现后再调用 `fulfill_redemption`。
-
-### adjust_points
-
-- `bonus`：额外奖励
-- `penalty`：受 user 惩罚暂停与每日扣分上限约束，且余额不低于 0
-- `correction`：明确的账本校正
-
-`reason` 会原样进入 user 可见历史，应准确、克制且可理解。
-`punishment_intensity` 只是 `get_overview` 中供 AI 理解边界的 0–5 偏好值，不会自动放大
-扣分，也不授权 AI 绕过禁止内容、暂停开关或每日限额。
-当余额为 0 时，`penalty` 会返回 `entry: null`、`applied_amount: 0`，并把本次意图作为
-幂等的安全 no-op 记录下来；负数 correction 不能把余额降到 0 以下。
-
-## 幂等
-
-写工具的 `idempotency_key` 为 8～128 字符。推荐：
-
-```text
-task-20260719-bedtime-water-v1
-review-task_xxx-attempt-1
-reward-create-song-right-v1
-```
-
-同一 key 用于不同操作会返回冲突；成功请求重试会返回原响应，不会重复发分、扣分、创建或兑换。
+重启后生效。公网部署保持默认 `token`。

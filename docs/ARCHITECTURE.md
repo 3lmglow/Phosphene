@@ -1,94 +1,163 @@
-# Phosphene 1.0 架构
+# 架构说明
 
-## 领域边界
+本文面向维护者，说明 Phosphene 的组件边界与一致性设计。对外产品行为见 [产品与规则](PRODUCT_SPEC.md)。
 
-Phosphene 是单实例、单 user、单 AI。该限制是产品边界，不是临时删减，因此没有 tenant id、公开注册、邀请、组织或角色管理复杂度。
+## 设计范围
 
-## 服务边界
+Phosphene 是单实例、单用户、单 AI 的自托管应用。生产拓扑是一套应用进程和一个 SQLite 持久卷：
 
-- Express 提供 REST、MCP、认证、上传和生产静态文件
-- React/Vite 提供响应式网站
-- Drizzle 提供统一关系模型、migration 与事务
-- 嵌入式 SQLite 保存业务数据、不可变积分账本、幂等响应和审计记录
-- 默认私有目录保存重新编码后的图片与审核预览
-- Sharp 在写入存储前验证并净化图片
+```text
+Browser / PWA ─┐
+               ├─ Express ─ React static files
+AI / MCP ──────┤           ├ REST API
+               │           ├ Streamable HTTP MCP
+               │           └ Webhook worker
+               └─ /data ─── SQLite + private images
+```
 
-生产实例把 SQLite 数据库和图片都放在 `/data` 持久化卷中。应用重建只替换容器文件，不替换持久化卷。产品只支持这一种单实例拓扑，避免一人一 AI 场景承担多服务部署、跨存储备份与恢复不一致。
+这个范围省去了 tenant、组织、外部数据库、对象存储和消息队列，同时让网站备份与恢复覆盖完整业务数据。
+
+## 组件
+
+| 组件 | 职责 |
+| --- | --- |
+| Express | 认证、REST、MCP、上传、静态网站和健康检查 |
+| React / Vite | 响应式网站与 PWA |
+| Drizzle / SQLite | 关系模型、migration、事务和持久化 |
+| Sharp | 图片解码、格式与像素验证、重新编码、预览生成 |
+| MCP SDK | 无状态 Streamable HTTP 工具服务与 stdio 转接 |
+| Webhook worker | 领取 delivery、签名、发送、重试和停止重试 |
+
+容器中数据库和图片都位于 `/data`。应用镜像可以替换，持久卷保持不变。
 
 ## 任务模型
 
-`task_series` 保存重复 daily 规则与独立的 `paused_at` 状态；`tasks` 保存每个自然日的独立
-实例。`paused_at` 用来区分手动暂停与自然结束，唯一索引 `(series_id, occurrence_date)`
-保证重启、并发请求和网络重试不会生成重复实例。
+`task_series` 保存每日重复任务规则，`tasks` 保存每个自然日的任务实例。
 
-系统在概览、查询和写操作前执行 reconciliation：
+- `paused_at` 区分手动暂停与自然结束。
+- 唯一索引 `(series_id, occurrence_date)` 防止重启、并发与重试生成重复实例。
+- 暂停时只取消用户当地今天及以后的未提交实例。
+- 恢复时按当前日期与截止时间恢复或生成实例。
 
-1. 按 user 时区生成截至今天的 daily 实例
-2. 将已过截止时间且仍 pending 的任务标记 expired
-3. 原子写入受余额限制的扣分
-4. 从事实表重算日活动、连击、统计与成就
+任务提交保存在 `task_submissions`。每次尝试都有独立记录，图片通过对象 Key 关联。任务详情直接读取提交历史，因此驳回、重交和旧证据都可以回看。
 
-## 完成与延迟审核
+## Reconciliation
 
-self 任务提交后立即完成。ai_review 先写 submission 和 `submitted_at`；批准时 `completion_date` 使用 submission 在 user 时区对应的自然日，而不是审核日。
+概览、查询与写操作前会执行轻量 reconciliation：
 
-历史补入导致 streak bonus 变化时，系统追加差额 correction，不修改旧账本，以保持可审计性。
-任务详情从 `task_submissions` 读取全部尝试及其私有图片，不以任务是否已完成或证据类型
-决定是否展示，因此文字提交和早先被打回的尝试仍可回看。
+1. 按用户时区生成缺失的 daily 实例。
+2. 将超过截止时间且仍为 pending 的任务标记为 expired。
+3. 为逾期任务写入受余额下限约束的扣分。
+4. 在发生业务变化或派生数据不一致时重算日活动、连击、统计与成就。
 
-## 积分一致性
+没有业务变化的读取不会删除重建派生表。跨过自然日时只刷新需要变化的当前连击。
 
-任务奖励、任务扣分、手工调整、连击和兑换全部进入 `point_ledger`。余额与累计指标从账本重算；每个结算事件具有唯一幂等键。
+## 完成日期与延迟审核
 
-兑换在一个数据库事务中读取服务端价格、检查余额、创建 redemption、写负数账本与审计记录。
+`self` 提交立即完成。`ai_review` 先保存 submission 并进入 submitted。
 
-AI 主动调用 `manage_task(action="fail")` 与 `adjust_points(kind="penalty")` 都读取 user
-惩罚设置，并依据审计事实共用同一自然日的 AI 扣分上限。系统自动处理逾期时使用
-`actor=system`，不占用 AI 主动惩罚额度。
+AI 批准时，`completion_date` 使用用户提交时在其时区对应的自然日，而不是审核日期。若历史日期补入改变了后续连击奖励，系统向积分账本追加差额 correction，不改写已有流水。
+
+## 积分与兑换事务
+
+任务奖励、任务扣分、连击、AI 调整和兑换都写入 `point_ledger`。余额与累计指标可以从账本重算。
+
+关键动作在单个 SQLite 事务中完成：
+
+- 任务完成：更新任务与提交、写积分、更新派生统计、记录审计与领域事件
+- 任务失败或逾期：更新任务、写受限扣分并记录审计
+- 奖励兑换：读取服务端价格、检查余额、创建 redemption、扣分、记录审计与事件
+
+AI 主动失败与 manual penalty 读取同一套用户边界，并按用户自然日共用每日上限。系统自动逾期使用 `actor=system`，不占用 AI 主动额度。
+
+## 幂等
+
+`idempotency_keys` 保存：
+
+- key
+- operation
+- 规范化请求的 SHA-256
+- 成功响应
+
+同一 key、operation 和请求内容的重试返回原响应。operation 或内容变化时返回冲突。业务表上的唯一约束继续提供第二层一致性保护。
 
 ## MCP 边界
 
-同一 Express 服务在 `/mcp` 提供无状态 Streamable HTTP MCP。默认使用静态 AI Token，
-同时接受标准 `Authorization: Bearer` 与 `X-Phosphene-MCP-Token`；服务端只保存 Token 的
-SHA-256 哈希。`PHOSPHENE_MCP_AUTH_MODE=none` 只作为同机/可信内网兼容开关，公网部署
-保持默认 `token`。
+`/mcp` 提供无状态 Streamable HTTP。默认认证为静态 AI Token：
 
-只支持 stdio 的客户端可运行本地 `stdio-bridge`，由它把工具列表、调用与图片结果转发到
-原 `/mcp`。桥接器不接触数据库，也不构成第二种生产拓扑。OAuth 授权服务器不在 1.0
-边界内；不会用不完整实现替代现有 Token 鉴权。
+- 接受 `Authorization: Bearer`
+- 接受 `X-Phosphene-MCP-Token`
+- 数据库只保存 Token 的 SHA-256
 
-AI 工具固定为 7 个，user 的提交、上传、设置和兑换保持在受会话及 CSRF 保护的网站 REST API 内。每项写操作都要求可复用的幂等键，以便客户端安全重试。
+只支持 stdio 的客户端使用本地 `stdio-bridge` 转发工具调用与图片结果，数据和权限仍由远程服务处理。
 
-## 安全
+用户提交、上传、兑换与设置保留在网站 REST API 中；AI 的领域动作通过 MCP 完成。写工具都要求幂等键。
 
-- user：HttpOnly/SameSite Cookie + 独立 CSRF Cookie/Header
-- AI：默认静态 Token（Bearer 或专用 Header），数据库只保存 SHA-256
-- 密码：Argon2id
-- 写入口：Zod 校验、速率限制、审计日志
-- 证据上传：Multer 单图内存限额 → Sharp 真格式/像素校验 → 重新编码 → 私有存储
-- 备份上传：Multer 磁盘暂存 → ZIP 路径/数量/大小校验 → WebP 哈希与像素校验
-- 容器：入口以 root 处理卷权限，随后通过 `gosu` 降权为 `node`
-- 数据库：SQLite 启用 foreign keys、WAL、NORMAL synchronous 与 busy timeout；容器同时约束 V8 堆
-- 卷兼容：入口允许 root-squash 环境拒绝 `chown`，但在降权前必须验证 `node` 对数据目录有写权限
-- 首次设置：默认由首位成功提交设置的人认领；条件更新原子关闭初始化入口，避免并发重复认领
-- 可选保护：设置 `PHOSPHENE_SETUP_TOKEN` 后，首次设置请求必须提供完全相同的 Token
-- 会话：浏览器 Cookie 本身是不可预测的随机令牌，数据库只保存 SHA-256，不依赖额外的静态签名秘密
-- 生产配置：临时 SQLite 数据库或越界持久化路径会导致拒绝启动
+连接与工具契约见 [MCP 连接与工具](MCP.md)。
 
-## 备份
+## 领域事件与 Webhook
 
-导出 ZIP 包含版本化 JSON manifest、幂等响应与所有图片对象。业务表在一个 SQLite 读事务中
-取得一致性快照，图片从私有目录直接写入 ZIP 响应流。导出和恢复共用进程内维护锁：先等待已经
-进入的业务请求结束，再阻止新的 REST、MCP 和网页请求；`/healthz` 不受影响。
+任务提交、任务完成与奖励兑换在业务事务中调用统一事件服务：
 
-恢复上传先落盘到 `/data/tmp`，再用 lazy-entry 方式逐项读取。归档路径必须命中 manifest
-引用的严格白名单；原图会校验大小、SHA-256、WebP 真格式、像素和尺寸，预览图也会重新解析。
-服务端为恢复图片生成新的对象 Key，因此同一备份可以在原实例就地恢复。文件全部通过校验后，
-业务表和 `idempotency_keys` 才在一个数据库事务中替换；密码、会话和 AI Token 表不参与覆盖。
-事务提交后删除旧图片，进程下次启动还会清理没有数据库引用的残留图片目录和临时上传。
+1. 在 `domain_events` 写入不可变事件。
+2. 自增 `sequence` 作为消费者游标。
+3. 业务 `dedupe_key` 保证同一事实只记录一次。
+4. Webhook 已启用且订阅该事件时，同事务创建 `webhook_deliveries`。
 
-version 2 是当前格式；恢复器兼容不含幂等表的 version 1，并在导入旧格式时清空目标实例的旧
-幂等记录。详细限制和操作流程见 [备份与恢复](BACKUP.md)。
+事件只带 ID、actor、状态、日期和积分等结构化事实。任务正文、证明文字和图片由 AI 通过 MCP 按需查询。
 
-生产运维仍应同时快照整个 `/data` 卷：卷快照负责包含凭证的完整灾难恢复，网站 ZIP 负责业务
-数据下载、迁移和时间点恢复，两者不能互相完全替代。
+### Worker
+
+进程内 worker：
+
+1. 领取最早创建且已到期的 delivery。
+2. 写入 30 秒 lease 与唯一 lease token。
+3. 使用当前 Webhook 配置组成固定 JSON 请求。
+4. 用 HMAC-SHA256 签名并发送。
+5. 2xx 标记 delivered；其他结果安排下一次尝试。
+6. 超过最大次数标记 dead letter。
+
+过期 lease 可重新领取，因此进程崩溃不会永久卡住记录。投递采用 at-least-once 语义，接收端按 event id 去重。
+
+当前 worker 以单进程为运行边界。
+
+完整协议见 [完成通知](WEBHOOKS.md)。
+
+## 图片存储
+
+上传流程：
+
+1. Multer 限制文件数与单图大小。
+2. Sharp 解码并验证真实格式、像素与尺寸。
+3. 按方向重新编码为 WebP，去除原元数据。
+4. 保存净化后的完整图片与审核预览。
+5. 数据库记录对象 Key、MIME、大小、SHA-256、尺寸与归属。
+
+图片路由要求网站会话；MCP 只在查询证据时返回审核预览。
+
+## 备份与恢复
+
+导出与恢复共用维护锁：
+
+- 先等待已进入的业务请求和投递结束
+- 暂停新的 REST、MCP 与 Webhook 领取
+- 保持 `/healthz` 可用
+
+导出从同一 SQLite 读事务取得业务表快照，并流式写入 ZIP。恢复上传先落盘到 `/data/tmp`，逐项校验路径、大小、哈希、格式与像素。
+
+恢复图片使用新的对象 Key。业务表替换、seed、reconciliation 和恢复审计在一个事务中完成；提交后再清理旧图片。Webhook 配置与实例凭据不从网站 ZIP 覆盖。
+
+详细流程见 [备份与恢复](BACKUP.md)。
+
+## 认证与安全边界
+
+| 入口 | 保护 |
+| --- | --- |
+| 用户网站 | Argon2id 密码、HttpOnly/SameSite 会话、CSRF |
+| MCP | AI Token，数据库保存哈希 |
+| Webhook | 独立 HMAC 密钥、timestamp 与 event id |
+| 上传图片 | 类型、大小、像素验证与重新编码 |
+| 恢复 ZIP | 磁盘暂存、路径白名单、大小与内容校验 |
+| 写操作 | Zod、速率限制、幂等与审计日志 |
+
+容器入口准备卷权限后，以 `node` 用户运行应用。SQLite 启用 foreign keys、WAL、NORMAL synchronous 和 busy timeout。

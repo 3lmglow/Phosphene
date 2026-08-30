@@ -5,7 +5,15 @@ import {
   RETIRED_PRESET_REWARDS
 } from "../../shared/rewards";
 import { getDb } from "./client";
-import { achievements, appSettings, auditLogs, rewardItems, statistics } from "./schema";
+import { createSecret } from "../lib/ids";
+import {
+  achievements,
+  appSettings,
+  auditLogs,
+  rewardItems,
+  statistics,
+  webhookConfig
+} from "./schema";
 
 const achievementDefinitions = [
   ["first_task", "第一束光", "完成第一个任务", "completed", 1, "sparkles"],
@@ -35,8 +43,8 @@ const achievementDefinitions = [
   ["redemption_10", "愿望熟客", "完成 10 次兑换", "redemptions", 10, "heart-handshake"]
 ] as const;
 
-export async function seedDatabase(): Promise<void> {
-  const db = getDb();
+export async function seedDatabase(database: any = getDb(), analyze = true): Promise<void> {
+  const db = database;
   await db
     .insert(appSettings)
     .values({ id: 1 })
@@ -44,6 +52,10 @@ export async function seedDatabase(): Promise<void> {
   await db
     .insert(statistics)
     .values({ id: 1 })
+    .onConflictDoNothing();
+  await db
+    .insert(webhookConfig)
+    .values({ id: 1, signingSecret: createSecret(32) })
     .onConflictDoNothing();
 
   await db
@@ -121,7 +133,7 @@ export async function seedDatabase(): Promise<void> {
   `);
   const currentPresetIds = new Set<string>(PRESET_REWARDS.map((reward) => reward.id));
   const hiddenRewards = (await db.select().from(rewardItems))
-    .filter((reward) => {
+    .filter((reward: any) => {
       if (reward.active || currentPresetIds.has(reward.id)) return false;
       const untouchedRetiredPreset = RETIRED_PRESET_REWARDS.some((retired) =>
         reward.id === retired.id &&
@@ -163,5 +175,5 @@ export async function seedDatabase(): Promise<void> {
     .onConflictDoNothing();
 
   // Refresh SQLite planner statistics after the built-in data is present.
-  await db.run(sql`analyze`);
+  if (analyze) await db.run(sql`analyze`);
 }

@@ -9,6 +9,7 @@ import { eq, getTableColumns } from "drizzle-orm";
 import sharp from "sharp";
 import { openPromise, type Entry, type ZipFile } from "yauzl";
 import { MAX_PROOF_IMAGE_PIXELS } from "../../shared/constants";
+import { settingsSchema } from "../../shared/schemas";
 import { getDb } from "../db/client";
 import { seedDatabase } from "../db/seed";
 import {
@@ -16,6 +17,7 @@ import {
   appSettings,
   auditLogs,
   dailyActivity,
+  domainEvents,
   idempotencyKeys,
   pointLedger,
   proofAssets,
@@ -24,11 +26,12 @@ import {
   statistics,
   taskSeries,
   taskSubmissions,
-  tasks
+  tasks,
+  webhookDeliveries
 } from "../db/schema";
 import { AppError } from "../errors";
 import { createId } from "../lib/ids";
-import { reconcileSystem } from "./domain";
+import { reconcileInTransaction } from "./domain";
 import {
   deleteObject,
   getObjectPath,
@@ -38,7 +41,7 @@ import {
 } from "./storage";
 
 const BACKUP_MANIFEST = "phosphene-backup.json";
-const BACKUP_FORMAT_VERSION = 2;
+const BACKUP_FORMAT_VERSION = 3;
 const MAX_BACKUP_MANIFEST_BYTES = 32 * 1024 * 1024;
 const MAX_BACKUP_ROWS = 500_000;
 const MAX_BACKUP_ENTRIES = 200_000;
@@ -60,7 +63,11 @@ const timestampFields = new Set([
   "reviewedAt",
   "redeemedAt",
   "fulfilledAt",
-  "unlockedAt"
+  "unlockedAt",
+  "nextAttemptAt",
+  "leaseExpiresAt",
+  "lastAttemptAt",
+  "deliveredAt"
 ]);
 
 const backupTables = {
@@ -76,7 +83,9 @@ const backupTables = {
   statistics,
   achievementUnlocks,
   auditLogs,
-  idempotencyKeys
+  idempotencyKeys,
+  domainEvents,
+  webhookDeliveries
 } as const;
 
 type BackupData = {
@@ -203,7 +212,7 @@ function parseManifest(buffer: Buffer): ParsedBackup {
   if (
     !isRecord(manifest) ||
     manifest.format !== "phosphene-backup" ||
-    ![1, BACKUP_FORMAT_VERSION].includes(Number(manifest.version)) ||
+    ![1, 2, BACKUP_FORMAT_VERSION].includes(Number(manifest.version)) ||
     !isRecord(manifest.data)
   ) {
     throw new AppError(400, "unsupported_backup", "This backup format is not supported");
@@ -215,7 +224,8 @@ function parseManifest(buffer: Buffer): ParsedBackup {
     [keyof BackupData, (typeof backupTables)[keyof typeof backupTables]]
   >) {
     const source =
-      name === "idempotencyKeys" && version === 1
+      (name === "idempotencyKeys" && version === 1) ||
+      (["domainEvents", "webhookDeliveries"].includes(name) && version < 3)
         ? []
         : manifest.data[name];
     const rows = sanitizeRows(table, source, name);
@@ -228,8 +238,24 @@ function parseManifest(buffer: Buffer): ParsedBackup {
   if (data.settings.length !== 1 || data.statistics.length !== 1) {
     throw invalidBackup("Backup must contain exactly one settings row and one statistics row");
   }
+  const settings = data.settings[0];
+  try {
+    settingsSchema.parse({
+      timezone: settings.timezone,
+      user_label: settings.userLabel,
+      ai_label: settings.aiLabel,
+      allowed_content: settings.allowedContent,
+      prohibited_content: settings.prohibitedContent,
+      punishment_intensity: settings.punishmentIntensity,
+      daily_penalty_limit: settings.dailyPenaltyLimit,
+      punishments_paused: settings.punishmentsPaused,
+      boundary_notes: settings.boundaryNotes
+    });
+  } catch {
+    throw invalidBackup("Backup application settings are invalid");
+  }
   let objects: BackupObjectMetadata = {};
-  if (version === BACKUP_FORMAT_VERSION) {
+  if (version >= 2) {
     if (!isRecord(manifest.objects)) {
       throw invalidBackup("Backup object metadata is missing");
     }
@@ -373,7 +399,9 @@ async function readBackupData(): Promise<BackupData> {
     statistics: await tx.select().from(statistics),
     achievementUnlocks: await tx.select().from(achievementUnlocks),
     auditLogs: await tx.select().from(auditLogs),
-    idempotencyKeys: await tx.select().from(idempotencyKeys)
+    idempotencyKeys: await tx.select().from(idempotencyKeys),
+    domainEvents: await tx.select().from(domainEvents),
+    webhookDeliveries: await tx.select().from(webhookDeliveries)
   }));
 }
 
@@ -544,7 +572,7 @@ function prepareProofTargets(parsed: ParsedBackup): Map<string, ProofArchiveTarg
     const originalMetadata = objects[sourceObjectName];
     const previewMetadata = objects[sourcePreviewName];
     if (
-      version === BACKUP_FORMAT_VERSION &&
+      version >= 2 &&
       (!originalMetadata ||
         !previewMetadata ||
         originalMetadata.sizeBytes !== sizeBytes ||
@@ -572,7 +600,7 @@ function prepareProofTargets(parsed: ParsedBackup): Map<string, ProofArchiveTarg
     };
   });
   if (
-    version === BACKUP_FORMAT_VERSION &&
+    version >= 2 &&
     (Object.keys(objects).length !== expected.size ||
       Object.keys(objects).some((name) => !expected.has(name)))
   ) {
@@ -584,6 +612,8 @@ function prepareProofTargets(parsed: ParsedBackup): Map<string, ProofArchiveTarg
 async function replaceDatabase(data: BackupData): Promise<void> {
   const db = getDb();
   await db.transaction(async (tx: any) => {
+    await tx.delete(webhookDeliveries);
+    await tx.delete(domainEvents);
     await tx.delete(idempotencyKeys);
     await tx.delete(achievementUnlocks);
     await tx.delete(pointLedger);
@@ -626,6 +656,12 @@ async function replaceDatabase(data: BackupData): Promise<void> {
     if (data.idempotencyKeys.length) {
       await tx.insert(idempotencyKeys).values(reviveRows(data.idempotencyKeys));
     }
+    if (data.domainEvents.length) {
+      await tx.insert(domainEvents).values(reviveRows(data.domainEvents));
+    }
+    if (data.webhookDeliveries.length) {
+      await tx.insert(webhookDeliveries).values(reviveRows(data.webhookDeliveries));
+    }
     await tx.insert(auditLogs).values({
       id: createId("audit"),
       actor: "user",
@@ -633,6 +669,8 @@ async function replaceDatabase(data: BackupData): Promise<void> {
       entityType: "system",
       summary: "Application data restored from a trusted backup"
     });
+    await seedDatabase(tx, false);
+    await reconcileInTransaction(tx);
   });
 }
 
@@ -731,8 +769,6 @@ export async function restoreBackupFromFile(filePath: string): Promise<void> {
         );
       }
       await removeStoredProofs(oldProofs);
-      await seedDatabase();
-      await reconcileSystem();
     } catch (error) {
       if (!databaseReplaced) {
         await Promise.allSettled(

@@ -24,6 +24,17 @@ export const AI_PROOF_REQUIREMENTS = [
 export const RECURRENCE_MODES = ["once", "daily"] as const;
 export const REVEAL_MODES = ["immediate", "next_visit", "at_time"] as const;
 export const ACTORS = ["AI", "user", "system"] as const;
+export const DOMAIN_EVENT_TYPES = [
+  "task.submitted",
+  "task.completed",
+  "redemption.created",
+  "notification.test"
+] as const;
+export const WEBHOOK_EVENT_TYPES = [
+  "task.submitted",
+  "task.completed",
+  "redemption.created"
+] as const;
 
 export const TIMEZONE_OPTIONS = [
   { value: "Asia/Shanghai", label: "中国标准时间 · 上海" },

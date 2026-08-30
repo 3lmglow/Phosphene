@@ -8,10 +8,12 @@ import { z } from "zod";
 import { MAX_PROOF_IMAGE_BYTES, MAX_PROOF_IMAGES } from "../shared/constants";
 import {
   loginSchema,
+  paginationCursorSchema,
   settingsSchema,
   setupSchema,
   submitTaskSchema,
-  taskQuerySchema
+  taskQuerySchema,
+  webhookSettingsSchema
 } from "../shared/schemas";
 import { config } from "./config";
 import { getDb } from "./db/client";
@@ -48,6 +50,14 @@ import {
   updateUserSettings
 } from "./services/domain";
 import { getObject, removeStoredProofs, saveProofImages } from "./services/storage";
+import {
+  createWebhookTestEvent,
+  getWebhookSettings,
+  listWebhookDeliveries,
+  retryWebhookDelivery,
+  rotateWebhookSecret,
+  updateWebhookSettings
+} from "./services/events";
 
 const router = Router();
 const authLimiter = rateLimit({
@@ -246,9 +256,67 @@ router.get(
 router.get(
   "/history",
   asyncRoute(async (request, response) => {
-    const kind = z.enum(["all", "tasks", "points", "redemptions", "audit"]).default("all").parse(request.query.kind);
+    const kind = z.enum(["all", "tasks", "points", "redemptions", "audit", "events"]).default("all").parse(request.query.kind);
     const limit = z.coerce.number().int().min(1).max(100).default(50).parse(request.query.limit);
-    response.json({ ok: true, data: await queryHistory({ kind, limit }) });
+    const afterSequence = request.query.after_sequence == null
+      ? undefined
+      : z.coerce.number().int().min(0).parse(request.query.after_sequence);
+    const cursor = request.query.cursor == null
+      ? undefined
+      : paginationCursorSchema.parse(request.query.cursor);
+    response.json({
+      ok: true,
+      data: await queryHistory({ kind, limit, after_sequence: afterSequence, cursor })
+    });
+  })
+);
+
+router.get(
+  "/notifications/webhook",
+  asyncRoute(async (_request, response) => {
+    response.json({ ok: true, data: await getWebhookSettings() });
+  })
+);
+
+router.put(
+  "/notifications/webhook",
+  asyncRoute(async (request, response) => {
+    response.json({
+      ok: true,
+      data: await updateWebhookSettings(webhookSettingsSchema.parse(request.body))
+    });
+  })
+);
+
+router.post(
+  "/notifications/webhook/rotate-secret",
+  asyncRoute(async (_request, response) => {
+    response.status(201).json({ ok: true, data: await rotateWebhookSecret() });
+  })
+);
+
+router.post(
+  "/notifications/webhook/test",
+  asyncRoute(async (_request, response) => {
+    response.status(202).json({ ok: true, data: await createWebhookTestEvent() });
+  })
+);
+
+router.get(
+  "/notifications/webhook/deliveries",
+  asyncRoute(async (request, response) => {
+    const limit = z.coerce.number().int().min(1).max(100).default(20).parse(request.query.limit);
+    response.json({ ok: true, data: await listWebhookDeliveries(limit) });
+  })
+);
+
+router.post(
+  "/notifications/webhook/deliveries/:deliveryId/retry",
+  asyncRoute(async (request, response) => {
+    response.json({
+      ok: true,
+      data: await retryWebhookDelivery(routeParam(request, "deliveryId"))
+    });
   })
 );
 

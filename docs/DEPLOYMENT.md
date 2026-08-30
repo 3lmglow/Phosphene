@@ -1,135 +1,145 @@
 # 部署与运维
 
-## 正式生产拓扑
+Phosphene 的部署结构很简单：
 
-Phosphene 的正式生产方式固定为一个应用服务加一个持久化卷：
+- 一个应用服务
+- 一个挂载到 `/data` 的持久卷
+- 一个指向应用服务的 HTTPS 域名
 
-- Phosphene App：建议 1 vCPU / 512 MB RAM
-- 一个持久化卷：挂载到 `/data`，建议至少 1 GB
-- 一个 HTTPS 域名：绑定 App 的 HTTP 端口
+同一个应用进程提供网页、REST API 和 MCP。SQLite 与私有图片都在 `/data` 中，不需要额外部署数据库或对象存储。
 
-`/data/phosphene.sqlite` 保存 SQLite 数据库，`/data/uploads` 保存经过净化的私有图片，
-`/data/tmp` 只暂存恢复上传。网页、REST API 和 MCP 均由同一个进程和域名提供。
+## 选择部署方式
 
-这是完整的正式模式。项目不要求 PostgreSQL、MinIO、Supabase 或其他外部数据服务。
-
-## Zeabur 发布
-
-1. 把仓库推送到 GitHub。
-2. 在 Zeabur 项目中选择 **Deploy New Service → Git**，连接该仓库。
-3. Zeabur 从根目录 `Dockerfile` 构建并运行应用。
-4. 在 **Phosphene App 服务**上添加持久化卷，挂载目录精确填写 `/data`，建议容量至少 1 GB。
-5. 不需要设置必填环境变量。时区在首次设置网页中选择。
-6. 绑定一个尚未公开且不容易随手猜到的域名，等待 `/healthz` 返回 200。
-7. 立即打开网站并设置登录密码。首位成功提交设置的人会认领实例，之后初始化入口永久关闭。
-8. 保存只显示一次的 AI Token。
-9. 分别执行一次 Restart 和 Redeploy，确认设置仍在且没有重新出现首次设置页。
-
-Zeabur 注入的 `PORT` 和 `ZEABUR_WEB_URL` 会被应用自动使用；一般不需要手工填写 `PUBLIC_URL`。
-
-### 持久卷检查
-
-挂载完成后应满足：
-
-```text
-Service: Phosphene App
-Mount path: /data
-Database: /data/phosphene.sqlite
-Images: /data/uploads
-Restore temp: /data/tmp
-```
-
-以下配置都不正确：
-
-- 只挂 `/data/uploads`；
-- 把卷挂到项目中的其他服务；
-- 使用 `/tmp` 或容器根目录代替持久卷；
-- 只依赖 Dockerfile 的 `VOLUME` 声明，没有在 Zeabur 创建持久卷。
-
-应用 ready 日志会输出 `dataDir` 与 `deploymentMode`。生产实例应显示 `/data` 和 `single`。
-
-### 环境变量
-
-| 变量 | Zeabur 建议 |
+| 方式 | 适合 |
 | --- | --- |
-| `PORT` | 由平台注入，不要覆盖 |
-| `ZEABUR_WEB_URL` | 由平台注入 |
-| `PUBLIC_URL` | 通常留空；自动 URL 不正确时才填写完整 HTTPS 地址 |
-| `PHOSPHENE_SETUP_TOKEN` | 可选；域名提前公开或无法立即认领时设置 |
-| `PHOSPHENE_MCP_AUTH_MODE` | 保持 `token` |
-| `PHOSPHENE_DATA_DIR` | 不设置，镜像默认 `/data` |
-| `SQLITE_PATH` / `LOCAL_STORAGE_PATH` | 不设置，除非明确需要并确保仍位于 `/data` |
+| Zeabur Template | 直接使用已发布版本，最快开始 |
+| fork + Zeabur GitHub 部署 | 保存自己的修改，并从 fork 持续部署 |
+| Docker Compose | 在自己的电脑或服务器上运行 |
+| Docker Image | 已有容器平台，只想运行发布镜像 |
 
-`PHOSPHENE_MCP_AUTH_MODE` 默认是 `token`，现有部署无需添加。只有服务完全位于可信私网且
-客户端无法发送请求头时才可改成 `none`；修改后需要重启。公开域名不得关闭 MCP 鉴权。
+如果准备长期使用或修改项目，推荐先 fork 仓库，再把 fork 连接到 Zeabur。这样部署来源、个人改动和后续更新都保留在自己的仓库中。
 
-随机域名只减少无意访问，不提供真正的身份认证。若使用已经公开或可预测的域名，或者部署后无法立即完成设置，应在绑定公网域名前配置一个至少 24 位的随机 `PHOSPHENE_SETUP_TOKEN`。启用后，首次设置页会要求该 Token；留空则保持默认的首位访问者认领流程。
+## Zeabur：从 fork 部署
 
-SQLite 不需要 WebAssembly 数据库堆。镜像仍约束 Node.js 堆，部署后可在 ready 日志查看 `memoryRssMb`，并在 Zeabur Metrics 核对峰值。
+### 1. 创建应用服务
 
-## 启动顺序
+1. fork 本仓库。
+2. 在 Zeabur 创建项目，选择 **Deploy New Service → GitHub**。
+3. 连接自己的 fork，并选择要部署的分支。
+4. 保持构建目录为仓库根目录。Zeabur 会识别根目录的 `Dockerfile`。
+5. 等待应用完成第一次构建。
 
-1. 容器入口确保 `/data` 存在，并以非 root 的 `node` 用户启动应用
-2. 打开 `/data/phosphene.sqlite`，启用 foreign keys、WAL 与 busy timeout
-3. 自动运行 Drizzle migrations
-4. 初始化 `/data/uploads` 与 `/data/tmp`，清理中断操作留下的临时 ZIP 和无引用图片
-5. seed 预设奖励和成就
-6. reconciliation 生成 daily 并处理停机期间的逾期
-7. 未初始化时进入首位访问者模式或 Token 保护模式
-8. `/healthz` 返回 200
+Zeabur 的界面操作可参考官方的 [Create Service](https://zeabur.com/docs/en-US/deploy/create/create-service) 和 [Dockerfile deployment](https://zeabur.com/docs/en-US/deploy/methods/dockerfile)。
 
-## 健康检查
+### 2. 挂载持久卷
+
+在刚创建的 **Phosphene 应用服务**中添加持久卷：
+
+| 配置 | 值 |
+| --- | --- |
+| Mount Directory | `/data` |
+| 初始容量 | 建议至少 1 GB |
+
+应用会在卷中建立：
 
 ```text
-GET /healthz
-200 {"status":"ok","version":"1.0.0"}
+/data/
+├── phosphene.sqlite
+├── phosphene.sqlite-wal
+├── phosphene.sqlite-shm
+├── uploads/
+│   └── proofs/
+└── tmp/
 ```
 
-健康检查不执行高频数据库写入。部署后另做一次 `/api/bootstrap` 冒烟验证。
+WAL 和 SHM 文件只在 SQLite 运行期间出现。Zeabur 的卷说明见 [Volumes](https://zeabur.com/docs/en-US/data-management/volumes)。
 
-## 持久化与删除风险
+`/data` 必须挂在 Phosphene 服务本身。只挂 `/data/uploads` 会漏掉数据库；Dockerfile 中的 `VOLUME` 声明也不能代替平台上真正的持久卷。
 
-- 普通重启、重新构建或发布新镜像不会清除 `/data`。
-- Restart 保留数据而 Redeploy 丢数据，说明应用此前仍在使用容器临时层。
-- 删除服务时是否保留卷取决于 Zeabur 的删除选择；删除卷会永久删除数据库和图片。
-- 不要把 `PHOSPHENE_DATA_DIR` 改为临时目录。
-- 生产模式会拒绝 `SQLITE_PATH=:memory:`。
-- 自定义 `SQLITE_PATH` 或 `LOCAL_STORAGE_PATH` 时，两者都必须位于 `PHOSPHENE_DATA_DIR` 内。
+### 3. 配置首次认领
 
-## 升级
+Phosphene 没有必填环境变量。若域名会在你完成设置前公开，添加：
 
-1. 创建 `/data` 持久化卷快照。
-2. 另行下载网站 ZIP 作为应用级副本。
-3. 阅读 release notes。
-4. 部署新镜像；migration 自动运行。
-5. 验证登录、任务查询、MCP `get_overview` 和一张历史预览图。
+```env
+PHOSPHENE_SETUP_TOKEN=一段保存在密码管理器中的随机字符串
+```
 
-不要跨多个大版本直接跳跃。失败时先回滚 App 镜像；若 migration 不向后兼容，再从卷快照恢复。
-PWA 更新后可能需要完全关闭已安装应用，再从浏览器打开网站刷新一次。
+未设置时，由首位成功提交首次设置的人认领实例。设置后，首次设置页会先验证这个 Token。
 
-## 备份计划
+常用环境变量：
 
-- 每日或每次重要变更前：`/data` 持久化卷快照
-- 每周：网站 ZIP，下载到不同故障域
-- 每月：按 [备份与恢复](BACKUP.md) 在独立临时实例执行一次恢复演练
-- AI Token 轮换后：确认 MCP 客户端已更新
+| 变量 | 说明 |
+| --- | --- |
+| `PORT` | HTTP 端口；Zeabur 自动提供 |
+| `PUBLIC_URL` | 公开地址；Zeabur 自动地址不正确时才填写 |
+| `PHOSPHENE_SETUP_TOKEN` | 可选的首次认领保护 |
+| `PHOSPHENE_MCP_AUTH_MODE` | 默认 `token`；公开部署保持默认 |
+| `PHOSPHENE_DATA_DIR` | 生产镜像默认 `/data` |
+| `SQLITE_PATH` | 可选数据库路径覆盖，必须位于数据目录内 |
+| `LOCAL_STORAGE_PATH` | 可选图片路径覆盖，必须位于数据目录内 |
+| `LOG_LEVEL` | 日志级别，默认 `info` |
 
-卷快照包含当前凭证和 SQLite 运行文件，是整机灾难恢复手段；网站 ZIP 保留业务记录、幂等
-响应与图片，适合下载和迁移，但不会覆盖密码、会话或 AI Token。两种备份应同时保留。
-ZIP 采用流式导出和磁盘恢复，恢复时仍需为上传 ZIP、旧图片和新图片同时预留卷空间。
+网站密码和 AI Token 都不属于服务端环境变量：密码通过首次设置页提交，AI Token 保存在调用 MCP 的客户端。
 
-SQLite 使用 WAL 时会在数据库旁维护 `-wal` 和 `-shm` 文件，因此文件级手工复制必须先正常停止应用。优先使用 Zeabur 卷快照或网站 ZIP，避免复制到不一致的时间点。
+### 4. 绑定域名并检查启动
+
+为应用服务生成或绑定 HTTPS 域名，然后访问：
+
+```text
+https://你的域名/healthz
+```
+
+正常响应：
+
+```json
+{"status":"ok","version":"1.0.0"}
+```
+
+ready 日志会显示当前 `dataDir`；生产容器应为 `/data`。
+
+### 5. 完成首次设置
+
+打开网站，设置登录密码、双方称呼和时区。完成后立即保存只显示一次的 AI Token，再按照 [MCP 连接与工具](MCP.md) 连接 AI。
+
+随后做一次持久化检查：
+
+1. 在设置页修改一个称呼。
+2. 重启 Zeabur 服务。
+3. 确认称呼仍在，且网站没有重新进入首次设置。
+4. 再执行一次 Redeploy，重复确认。
+
+如果 Restart 后数据仍在、Redeploy 后消失，说明之前写入的是容器临时层。检查卷是否挂在当前服务的 `/data`。
+
+## Zeabur Template
+
+仓库根目录的 `zeabur-template.yaml` 会创建发布镜像、域名和 `/data` 卷。部署后仍应检查：
+
+- 卷挂载路径是 `/data`
+- `/healthz` 返回 200
+- 首次设置后执行 Restart 和 Redeploy，数据都保留
+
+Template 使用 `ghcr.io/3lmglow/phosphene:latest`。发布新镜像后，需要在 Zeabur 重新部署服务以拉取更新。
 
 ## Docker Compose
 
-仓库根目录的 `docker-compose.yml` 只启动一个应用服务，并把命名卷挂载到 `/data`：
+要求 Docker 与 Docker Compose：
 
 ```bash
+git clone https://github.com/3lmglow/Phosphene.git
+cd Phosphene
 docker compose up -d --build
 ```
 
-如需保护首次认领，可在启动前设置 `PHOSPHENE_SETUP_TOKEN`。不需要数据库密码或对象存储凭证。
-Compose 使用 `phosphene-data:/data` 命名卷。`docker compose down` 会保留它；`docker compose down -v` 会删除它和全部 Phosphene 数据。
+打开 `http://localhost:8080`。Compose 创建 `phosphene-data` 命名卷并挂载到 `/data`。
+
+如需在首次启动前设置认领 Token：
+
+```bash
+export PHOSPHENE_SETUP_TOKEN="replace-with-a-private-random-value"
+docker compose up -d --build
+```
+
+`docker compose down` 会保留命名卷；`docker compose down -v` 会删除卷和其中的全部 Phosphene 数据。
 
 更新：
 
@@ -138,7 +148,9 @@ git pull --ff-only
 docker compose up -d --build
 ```
 
-直接使用发布镜像：
+不要让两个 Phosphene 容器同时写入同一个 SQLite 卷。
+
+## Docker Image
 
 ```bash
 docker run -d \
@@ -149,10 +161,56 @@ docker run -d \
   ghcr.io/3lmglow/phosphene:latest
 ```
 
-不要同时启动两个写入同一 SQLite 卷的 Phosphene 容器。该项目是单进程嵌入式数据库拓扑，不使用多副本横向扩容。
+如需固定版本，把 `latest` 替换为对应镜像标签。
 
-## 日志与隐私
+## 启动过程
 
-结构化日志只记录请求方法、路径、状态和耗时，不记录 Authorization、Cookie、密码、图片内容或 `proof_text`。向支持人员提供日志前，仍应人工删除域名、IP、任务标题和其他私人上下文。
+每次启动会依次：
 
-常见 Crash loop、卷权限、401、405、PWA 和图片问题见 [故障排查](TROUBLESHOOTING.md)。
+1. 检查数据目录并以非 root 用户运行应用
+2. 打开 SQLite，启用 foreign keys、WAL 和 busy timeout
+3. 自动运行 Drizzle migrations
+4. 初始化图片与临时目录，清理中断操作遗留的临时文件
+5. 补充内置奖励和成就
+6. 生成缺失的每日任务并处理停机期间的逾期
+7. 启动完成通知 worker
+8. 开放健康检查与业务入口
+
+## 更新
+
+更新前：
+
+1. 创建 `/data` 卷快照。
+2. 从网站下载一份 ZIP。
+3. 阅读 [更新说明](RELEASE_NOTES.md)。
+
+更新 fork 时，把上游改动合并到自己连接 Zeabur 的分支并推送。Zeabur 构建新容器后，Phosphene 会自动运行 migration。
+
+更新后检查：
+
+- `/healthz`
+- 网站登录和最近任务
+- 一张历史证据图片
+- MCP `get_overview`
+- 已配置完成通知时，发送一次测试事件
+
+PWA 仍显示旧页面时，完全关闭已安装应用，再从浏览器打开网站并刷新一次。
+
+## 回滚
+
+回滚要同时考虑应用镜像和数据库：
+
+- 数据库结构仍兼容旧版本时，可以只回滚应用部署。
+- migration 已改变旧版本无法读取的结构时，恢复匹配的旧应用版本和升级前卷快照。
+
+先保留当前卷与第一条 migration 错误，再执行回滚。普通更新问题不需要删除服务、删除卷或重新认领实例。
+
+## 数据与运行边界
+
+- Restart、重新构建和正常发布不会清除已挂载的 `/data`。
+- 删除持久卷会删除数据库和图片。
+- 生产模式拒绝内存数据库和位于数据目录外的持久化路径。
+- 公开域名保持 `PHOSPHENE_MCP_AUTH_MODE=token`。
+- 卷快照与网站 ZIP 的区别和恢复方法见 [备份与恢复](BACKUP.md)。
+
+启动、权限、数据丢失、MCP 与图片问题见 [故障排查](TROUBLESHOOTING.md)。

@@ -5,6 +5,7 @@ import {
   REVEAL_MODES,
   TASK_DIFFICULTIES,
   TASK_STATUSES,
+  WEBHOOK_EVENT_TYPES,
   TASK_TYPES,
   VERIFICATION_MODES
 } from "./constants";
@@ -67,6 +68,20 @@ export const createTaskSchema = z
         message: "每日重复任务应使用 daily_deadline_time"
       });
     }
+    if (value.recurrence === "daily" && value.reveal_mode !== "immediate") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reveal_mode"],
+        message: "每日重复任务固定立即展示，不支持延迟揭晓"
+      });
+    }
+    if (value.recurrence === "once" && (value.start_date || value.end_date)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.start_date ? "start_date" : "end_date"],
+        message: "一次性任务不能设置重复系列的开始或结束日期"
+      });
+    }
     if (value.reveal_mode === "at_time" && !value.visible_at) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -74,17 +89,41 @@ export const createTaskSchema = z
         message: "定时揭晓必须提供 visible_at"
       });
     }
+    if (value.reveal_mode !== "at_time" && value.visible_at) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["visible_at"],
+        message: "只有定时揭晓任务可以提供 visible_at"
+      });
+    }
+    if (
+      value.visible_at &&
+      value.deadline &&
+      new Date(value.visible_at).valueOf() >= new Date(value.deadline).valueOf()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["visible_at"],
+        message: "任务必须在截止时间之前揭晓"
+      });
+    }
   });
+
+const timestampCursorSchema = z.string().datetime({ offset: true });
+export const paginationCursorSchema = z.string().max(512).refine(
+  (value) => timestampCursorSchema.safeParse(value).success || /^pc_[A-Za-z0-9_-]+$/.test(value),
+  "分页 cursor 无效"
+);
 
 export const taskQuerySchema = z.object({
   task_id: z.string().optional(),
-  status: z.enum(TASK_STATUSES).optional(),
+  status: z.enum([...TASK_STATUSES, "active"]).optional(),
   type: z.enum(TASK_TYPES).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
   include_proof: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(30),
-  cursor: z.string().datetime({ offset: true }).optional()
+  cursor: paginationCursorSchema.optional()
 });
 
 export const manageTaskSchema = z
@@ -213,8 +252,44 @@ export const settingsSchema = z.object({
   boundary_notes: z.string().trim().max(4000)
 });
 
+const webhookUrl = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((value) => {
+    if (!value) return true;
+    try {
+      const parsed = new URL(value);
+      return (
+        ["http:", "https:"].includes(parsed.protocol) &&
+        !parsed.username &&
+        !parsed.password &&
+        !parsed.hash
+      );
+    } catch {
+      return false;
+    }
+  }, "Webhook URL 必须使用 http:// 或 https://，且不能包含账号、密码或 fragment");
+
+export const webhookSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    url: webhookUrl,
+    event_types: z.array(z.enum(WEBHOOK_EVENT_TYPES)).min(1).max(WEBHOOK_EVENT_TYPES.length)
+  })
+  .superRefine((value, context) => {
+    if (value.enabled && !value.url) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["url"],
+        message: "启用 Webhook 前必须填写接收地址"
+      });
+    }
+  });
+
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type TaskQueryInput = z.infer<typeof taskQuerySchema>;
 export type ManageTaskInput = z.infer<typeof manageTaskSchema>;
 export type RewardManageInput = z.infer<typeof rewardManageSchema>;
 export type AdjustPointsInput = z.infer<typeof adjustPointsSchema>;
+export type WebhookSettingsInput = z.infer<typeof webhookSettingsSchema>;

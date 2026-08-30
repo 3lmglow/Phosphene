@@ -2233,6 +2233,111 @@ svg {
   }
 }
 
+.pagination-action {
+  margin: 24px auto 0;
+  display: flex;
+}
+
+.timeline > .pagination-action {
+  position: relative;
+  z-index: 1;
+}
+
+.webhook-event-list {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .45);
+}
+
+.webhook-event-list > label {
+  min-height: 66px;
+  padding: 13px 15px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.webhook-event-list > label:last-child { border-bottom: 0; }
+.webhook-event-list input { accent-color: var(--plum); }
+.webhook-event-list span { display: grid; gap: 3px; }
+.webhook-event-list strong { font-size: 10px; }
+.webhook-event-list small { color: var(--ink-faint); font-size: 8px; }
+.webhook-event-list code { color: var(--ink-faint); font-size: 8px; }
+
+.webhook-actions {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.webhook-deliveries {
+  margin-top: 30px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.webhook-deliveries > div {
+  min-height: 48px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-muted);
+}
+
+.webhook-deliveries > div > strong { font-size: 10px; }
+.webhook-deliveries > div > button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-faint);
+  border: 0;
+  background: transparent;
+  font-size: 8px;
+  cursor: pointer;
+}
+.webhook-deliveries > div > button svg { width: 13px; }
+.webhook-deliveries > span { padding: 17px; display: block; color: var(--ink-faint); font-size: 9px; }
+
+.webhook-deliveries article {
+  min-height: 66px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.webhook-deliveries article > div { display: grid; gap: 3px; }
+.webhook-deliveries article strong { font-size: 9px; }
+.webhook-deliveries article span,
+.webhook-deliveries article small { color: var(--ink-faint); font-size: 8px; line-height: 1.5; }
+.webhook-deliveries article small { color: #98545b; overflow-wrap: anywhere; }
+
+.delivery-state { width: 7px; height: 7px; border-radius: 50%; background: #afa5a7; }
+.delivery-state--pending,
+.delivery-state--processing { background: #c19448; box-shadow: 0 0 0 3px #f7ecd8; }
+.delivery-state--delivered { background: #6e976f; box-shadow: 0 0 0 3px #e4eee3; }
+.delivery-state--dead_letter { background: #a5545c; box-shadow: 0 0 0 3px #f4e0e2; }
+
+@media (max-width: 720px) {
+  .settings-nav button:last-child { grid-column: auto; }
+  .webhook-actions { display: grid; }
+  .webhook-actions .button { width: 100%; justify-content: center; }
+  .webhook-event-list > label { grid-template-columns: auto minmax(0, 1fr); }
+  .webhook-event-list code { grid-column: 2; }
+  .webhook-deliveries article { grid-template-columns: 8px minmax(0, 1fr); }
+  .webhook-deliveries article .button { grid-column: 2; width: max-content; }
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
    PRIVATE SIGNAL — Phosphene 1.0 visual system
    Quiet indigo carries the private space; amber marks a response; soft

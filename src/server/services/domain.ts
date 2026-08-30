@@ -11,6 +11,7 @@ import {
   like,
   lt,
   lte,
+  notInArray,
   or,
   sql
 } from "drizzle-orm";
@@ -37,6 +38,7 @@ import {
   appSettings,
   auditLogs,
   dailyActivity,
+  domainEvents,
   idempotencyKeys,
   pointLedger,
   proofAssets,
@@ -57,11 +59,40 @@ import {
   yesterday
 } from "../lib/dates";
 import { createId } from "../lib/ids";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  type DecodedPageCursor
+} from "../lib/pagination";
 import type { StoredProof } from "./storage";
+import { sha256 } from "../lib/ids";
+import { emitDomainEvent } from "./events";
 
 type Db = any;
 type Actor = "AI" | "user" | "system";
 const SERIES_PAUSED_TASK_REASON = "Recurring series was paused";
+
+function parsePaginationCursor(value?: string): DecodedPageCursor | null {
+  if (!value) return null;
+  const cursor = decodePageCursor(value);
+  if (!cursor) throw new AppError(400, "invalid_cursor", "Pagination cursor is invalid");
+  return cursor;
+}
+
+function beforeCursor(
+  timestampColumn: any,
+  idColumn: any,
+  keyPrefix: string,
+  cursor: DecodedPageCursor | null
+) {
+  if (!cursor) return undefined;
+  if (!cursor.key) return lt(timestampColumn, cursor.at);
+  const rowKey = keyPrefix ? sql<string>`${keyPrefix} || ${idColumn}` : idColumn;
+  return or(
+    lt(timestampColumn, cursor.at),
+    and(eq(timestampColumn, cursor.at), lt(rowKey, cursor.key))
+  );
+}
 
 function presentRedemption(row: any, aiLabel: string) {
   return {
@@ -102,18 +133,39 @@ async function idempotent<T extends Record<string, unknown>>(
   tx: Db,
   operation: string,
   key: string,
+  request: unknown,
   work: () => Promise<T>
 ): Promise<T> {
+  const requestHash = sha256(JSON.stringify(canonicalJson(request)));
   const existing = await tx.query.idempotencyKeys.findFirst({
     where: eq(idempotencyKeys.key, key)
   });
   if (existing) {
     assertState(existing.operation === operation, "idempotency_conflict", "This idempotency key belongs to another operation");
+    assertState(
+      !existing.requestHash || existing.requestHash === requestHash,
+      "idempotency_payload_conflict",
+      "This idempotency key was already used with different request values"
+    );
     return existing.response as T;
   }
   const response = await work();
-  await tx.insert(idempotencyKeys).values({ key, operation, response });
+  await tx.insert(idempotencyKeys).values({ key, operation, requestHash, response });
   return response;
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalJson(item)])
+    );
+  }
+  return value;
 }
 
 function rewardForTask(task: { basePoints: number; difficulty: keyof typeof DIFFICULTY_MULTIPLIER }): number {
@@ -181,7 +233,11 @@ async function materializeSeries(tx: Db, through: string): Promise<number> {
   return created;
 }
 
-async function cancelPendingTasksFromPausedSeries(tx: Db, now: Date): Promise<number> {
+async function cancelPendingTasksFromPausedSeries(
+  tx: Db,
+  now: Date,
+  today: string
+): Promise<number> {
   const pausedSeries = await tx
     .select({ id: taskSeries.id })
     .from(taskSeries)
@@ -194,6 +250,7 @@ async function cancelPendingTasksFromPausedSeries(tx: Db, now: Date): Promise<nu
     .where(
       and(
         inArray(tasks.seriesId, pausedSeries.map((series: any) => series.id)),
+        gte(tasks.occurrenceDate, today),
         eq(tasks.status, "pending")
       )
     )
@@ -310,7 +367,13 @@ async function applyPenalty(
   return actual;
 }
 
-async function completeTask(tx: Db, task: any, completionDate: string, actor: Actor) {
+async function completeTask(
+  tx: Db,
+  task: any,
+  completionDate: string,
+  actor: Actor,
+  submissionId?: string
+) {
   assertState(
     task.status === "pending" || task.status === "submitted",
     "task_not_completable",
@@ -333,6 +396,22 @@ async function completeTask(tx: Db, task: any, completionDate: string, actor: Ac
   await audit(tx, actor, "task.completed", "task", task.id, `Completed task “${task.title}”`, {
     amount,
     completionDate
+  });
+  await emitDomainEvent(tx, {
+    type: "task.completed",
+    aggregateType: "task",
+    aggregateId: task.id,
+    actor,
+    dedupeKey: `task.completed:${task.id}`,
+    payload: {
+      task_id: task.id,
+      submission_id: submissionId ?? null,
+      status: "completed",
+      verification_mode: task.verificationMode,
+      completion_date: completionDate,
+      points: amount,
+      completed_by: actor
+    }
   });
 }
 
@@ -439,6 +518,42 @@ async function recomputeActivityAndStats(tx: Db, now = new Date()) {
   await evaluateAchievements(tx);
 }
 
+async function refreshCurrentStreak(tx: Db, now = new Date()) {
+  const settings = await getSettings(tx);
+  const latest = await tx.query.dailyActivity.findFirst({
+    orderBy: [desc(dailyActivity.activityDate)]
+  });
+  const today = localDate(now, settings.timezone);
+  const desired =
+    latest &&
+    (latest.activityDate === today || latest.activityDate === yesterday(today))
+      ? latest.streakLength
+      : 0;
+  const stats = assertFound(
+    await tx.query.statistics.findFirst({ where: eq(statistics.id, 1) })
+  );
+  if (stats.currentStreak !== desired) {
+    await tx
+      .update(statistics)
+      .set({ currentStreak: desired, updatedAt: now })
+      .where(eq(statistics.id, 1));
+  }
+}
+
+async function statisticsNeedRebuild(tx: Db): Promise<boolean> {
+  const [actual] = await tx
+    .select({
+      completed: sql<number>`sum(case when ${tasks.status} = 'completed' then 1 else 0 end)`,
+      balance: sql<number>`coalesce((select sum(${pointLedger.amount}) from ${pointLedger}), 0)`
+    })
+    .from(tasks);
+  const stats = assertFound(
+    await tx.query.statistics.findFirst({ where: eq(statistics.id, 1) })
+  );
+  return Number(actual?.completed ?? 0) !== stats.totalCompletedTasks ||
+    Number(actual?.balance ?? 0) !== stats.balance;
+}
+
 async function evaluateAchievements(tx: Db) {
   const stats = assertFound(await tx.query.statistics.findFirst({ where: eq(statistics.id, 1) }));
   const [{ value: redemptionCount }] = await tx
@@ -466,11 +581,11 @@ async function evaluateAchievements(tx: Db) {
   }
 }
 
-async function reconcileInTransaction(tx: Db, now = new Date()) {
+export async function reconcileInTransaction(tx: Db, now = new Date()) {
   const settings = await getSettings(tx);
   const today = localDate(now, settings.timezone);
   const generated = await materializeSeries(tx, today);
-  const pausedCancelled = await cancelPendingTasksFromPausedSeries(tx, now);
+  const pausedCancelled = await cancelPendingTasksFromPausedSeries(tx, now, today);
   const overdue = await tx.query.tasks.findMany({
     where: and(eq(tasks.status, "pending"), lte(tasks.deadlineAt, now))
   });
@@ -488,7 +603,11 @@ async function reconcileInTransaction(tx: Db, now = new Date()) {
       pausedCancelled
     });
   }
-  await recomputeActivityAndStats(tx, now);
+  if (overdue.length || await statisticsNeedRebuild(tx)) {
+    await recomputeActivityAndStats(tx, now);
+  } else {
+    await refreshCurrentStreak(tx, now);
+  }
   return { generated, expired: overdue.length, paused_cancelled: pausedCancelled };
 }
 
@@ -504,7 +623,7 @@ export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
       "ai_image_only_proof_unsupported",
       "AI-created tasks must use none, text, or text_and_image proof so every reviewed submission includes readable text"
     );
-    return idempotent(tx, "create_task", input.idempotency_key, async () => {
+    return idempotent(tx, "create_task", input.idempotency_key, input, async () => {
       const settings = await getSettings(tx);
       const today = localDate(new Date(), settings.timezone);
       if (input.recurrence === "daily") {
@@ -541,6 +660,11 @@ export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
         !input.deadline || new Date(input.deadline) > now,
         "deadline_in_past",
         "A new task deadline must be in the future"
+      );
+      assertState(
+        !input.visible_at || !input.deadline || new Date(input.visible_at) < new Date(input.deadline),
+        "invalid_reveal_window",
+        "A task must be revealed before its deadline"
       );
       const id = createId("task");
       const visibleAt =
@@ -590,15 +714,20 @@ export async function queryTasks(input: TaskQueryInput, actor: Actor = "AI") {
   const db = getDb();
   const conditions: any[] = [];
   if (input.task_id) conditions.push(eq(tasks.id, input.task_id));
-  if (input.status) conditions.push(eq(tasks.status, input.status));
+  if (input.status === "active") {
+    conditions.push(inArray(tasks.status, ["pending", "submitted"]));
+  } else if (input.status) {
+    conditions.push(eq(tasks.status, input.status));
+  }
   if (input.type) conditions.push(eq(tasks.type, input.type));
   if (input.from) conditions.push(gte(sql`coalesce(${tasks.occurrenceDate}, ${tasks.completionDate})`, input.from));
   if (input.to) conditions.push(lte(sql`coalesce(${tasks.occurrenceDate}, ${tasks.completionDate})`, input.to));
-  if (input.cursor) conditions.push(lt(tasks.createdAt, new Date(input.cursor)));
+  const cursor = parsePaginationCursor(input.cursor);
+  if (cursor) conditions.push(beforeCursor(tasks.createdAt, tasks.id, "", cursor));
   if (actor === "user") conditions.push(visibleTaskCondition(new Date()));
   const rows = await db.query.tasks.findMany({
     where: conditions.length ? and(...conditions) : undefined,
-    orderBy: [desc(tasks.createdAt)],
+    orderBy: [desc(tasks.createdAt), desc(tasks.id)],
     limit: input.limit + 1,
     with: input.include_proof
       ? {
@@ -613,14 +742,16 @@ export async function queryTasks(input: TaskQueryInput, actor: Actor = "AI") {
   const items = rows.slice(0, input.limit);
   return {
     items,
-    next_cursor: hasMore ? items.at(-1)?.createdAt?.toISOString() : null
+    next_cursor: hasMore && items.at(-1)
+      ? encodePageCursor(items.at(-1)!.createdAt, items.at(-1)!.id)
+      : null
   };
 }
 
 export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
   return getDb().transaction(async (tx: Db) => {
     await reconcileInTransaction(tx);
-    return idempotent(tx, "manage_task", input.idempotency_key, async () => {
+    return idempotent(tx, "manage_task", input.idempotency_key, input, async () => {
       const now = new Date();
       if (input.action === "pause_series" || input.action === "resume_series") {
         const series = assertFound(
@@ -703,6 +834,14 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
         };
         await tx.update(tasks).set(patch).where(eq(tasks.id, task.id));
         if (input.scope === "this_and_future" && task.seriesId) {
+          if (input.deadline) {
+            const settings = await getSettings(tx);
+            assertState(
+              localDate(new Date(input.deadline), settings.timezone) === task.occurrenceDate,
+              "series_deadline_date_mismatch",
+              "A recurring deadline edit must use the local date of the selected occurrence"
+            );
+          }
           const futurePatch = {
             title: patch.title,
             description: patch.description,
@@ -806,7 +945,7 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
           .update(taskSubmissions)
           .set({ status: "approved", reviewedAt: now, reviewReason: input.reason })
           .where(eq(taskSubmissions.id, submission.id));
-        await completeTask(tx, task, completionDate, actor);
+        await completeTask(tx, task, completionDate, actor, submission.id);
         await recomputeActivityAndStats(tx);
         return { task_id: task.id, status: "completed", completion_date: completionDate };
       }
@@ -880,12 +1019,33 @@ export async function submitTask(
 
     if (task.verificationMode === "self") {
       const settings = await getSettings(tx);
-      await completeTask(tx, task, localDate(now, settings.timezone), actor);
+      await completeTask(
+        tx,
+        task,
+        localDate(now, settings.timezone),
+        actor,
+        submissionId
+      );
       await recomputeActivityAndStats(tx);
       return { task_id: task.id, submission_id: submissionId, status: "completed" };
     }
     await tx.update(tasks).set({ status: "submitted", submittedAt: now, updatedAt: now }).where(eq(tasks.id, task.id));
     await audit(tx, actor, "submission.created", "task", task.id, `Submitted proof for “${task.title}”`);
+    await emitDomainEvent(tx, {
+      type: "task.submitted",
+      aggregateType: "task",
+      aggregateId: task.id,
+      actor,
+      dedupeKey: `task.submitted:${submissionId}`,
+      payload: {
+        task_id: task.id,
+        submission_id: submissionId,
+        attempt: Number(attempts ?? 0) + 1,
+        status: "submitted",
+        verification_mode: task.verificationMode,
+        submitted_by: actor
+      }
+    });
     return { task_id: task.id, submission_id: submissionId, status: "submitted" };
   });
 }
@@ -940,8 +1100,10 @@ export async function getOverview() {
 }
 
 export async function queryHistory(input: {
-  kind?: "all" | "tasks" | "points" | "redemptions" | "audit";
+  kind?: "all" | "tasks" | "points" | "redemptions" | "audit" | "events";
   limit?: number;
+  after_sequence?: number;
+  cursor?: string;
 }) {
   await reconcileSystem();
   const db = getDb();
@@ -949,13 +1111,21 @@ export async function queryHistory(input: {
   const limit = Math.min(input.limit ?? 30, 100);
   const kind = input.kind ?? "all";
   const result: Record<string, unknown> = {};
+  const cursor = parsePaginationCursor(input.cursor);
+  const pageRows = <T>(rows: T[]) => rows.slice(0, limit);
+  const pageHasMore = new Map<string, boolean>();
   if (kind === "all" || kind === "tasks") {
     const taskRows = await db.query.tasks.findMany({
-      where: inArray(tasks.status, ["completed", "failed", "expired", "cancelled"]),
-      orderBy: [desc(tasks.updatedAt)],
-      limit
+      where: and(
+        inArray(tasks.status, ["completed", "failed", "expired", "cancelled"]),
+        beforeCursor(tasks.updatedAt, tasks.id, "tasks:", cursor)
+      ),
+      orderBy: [desc(tasks.updatedAt), desc(tasks.id)],
+      limit: limit + 1
     });
-    const taskIds = taskRows.map((task: any) => task.id);
+    pageHasMore.set("tasks", taskRows.length > limit);
+    const taskPage = pageRows(taskRows);
+    const taskIds = taskPage.map((task: any) => task.id);
     const penaltyRows = taskIds.length
       ? await db
           .select({ taskId: pointLedger.taskId, amount: pointLedger.amount })
@@ -975,29 +1145,118 @@ export async function queryHistory(input: {
         (penaltyByTask.get(row.taskId) ?? 0) + Math.max(0, -Number(row.amount))
       );
     }
-    result.tasks = taskRows.map((task: any) => ({
+    result.tasks = taskPage.map((task: any) => ({
       ...task,
       penaltyAmount: penaltyByTask.get(task.id) ?? 0
     }));
   }
   if (kind === "all" || kind === "points") {
-    const rows = await db.query.pointLedger.findMany({ orderBy: [desc(pointLedger.createdAt)], limit });
-    result.points = rows.map((row: any) => ({
+    const rows = await db.query.pointLedger.findMany({
+      where: and(
+        beforeCursor(pointLedger.createdAt, pointLedger.id, "points:", cursor),
+        kind === "all"
+          ? notInArray(pointLedger.type, ["task_reward", "task_penalty", "redemption"])
+          : undefined
+      ),
+      orderBy: [desc(pointLedger.createdAt), desc(pointLedger.id)],
+      limit: limit + 1
+    });
+    pageHasMore.set("points", rows.length > limit);
+    result.points = pageRows(rows).map((row: any) => ({
       ...row,
       reason: presentLedgerReason(row.reason, settings.aiLabel)
     }));
   }
   if (kind === "all" || kind === "redemptions") {
     const rows = await db.query.redemptions.findMany({
-      orderBy: [desc(redemptions.redeemedAt)],
-      limit,
+      where: beforeCursor(redemptions.redeemedAt, redemptions.id, "redemptions:", cursor),
+      orderBy: [desc(redemptions.redeemedAt), desc(redemptions.id)],
+      limit: limit + 1,
       with: { rewardItem: true }
     });
-    result.redemptions = rows.map((row: any) => presentRedemption(row, settings.aiLabel));
+    pageHasMore.set("redemptions", rows.length > limit);
+    result.redemptions = pageRows(rows).map((row: any) => presentRedemption(row, settings.aiLabel));
   }
   if (kind === "all" || kind === "audit") {
-    result.audit = await db.query.auditLogs.findMany({ orderBy: [desc(auditLogs.createdAt)], limit });
+    const rows = await db.query.auditLogs.findMany({
+      where: beforeCursor(auditLogs.createdAt, auditLogs.id, "audit:", cursor),
+      orderBy: [desc(auditLogs.createdAt), desc(auditLogs.id)],
+      limit: limit + 1
+    });
+    pageHasMore.set("audit", rows.length > limit);
+    result.audit = pageRows(rows);
   }
+  if (kind === "events") {
+    const forward = input.after_sequence != null;
+    const rows = await db.query.domainEvents.findMany({
+      where: forward ? gt(domainEvents.sequence, input.after_sequence!) : undefined,
+      orderBy: [forward ? asc(domainEvents.sequence) : desc(domainEvents.sequence)],
+      limit: limit + 1
+    });
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit);
+    result.events = items;
+    result.next_sequence = hasMore || items.length
+      ? items.at(-1)?.sequence ?? input.after_sequence ?? null
+      : input.after_sequence ?? null;
+    result.has_more = hasMore;
+    return result;
+  }
+  if (kind === "all") {
+    const timeline = [
+      ...((result.tasks as Array<Record<string, unknown>> | undefined) ?? []).map((row) => ({
+        ...row,
+        eventKind: "tasks",
+        date: row.updatedAt
+      })),
+      ...((result.points as Array<Record<string, unknown>> | undefined) ?? []).map((row) => ({
+        ...row,
+        eventKind: "points",
+        date: row.createdAt
+      })),
+      ...((result.redemptions as Array<Record<string, unknown>> | undefined) ?? []).map((row) => ({
+        ...row,
+        eventKind: "redemptions",
+        date: row.redeemedAt
+      }))
+    ].sort((a, b) => {
+      const dateDifference = new Date(String(b.date)).valueOf() - new Date(String(a.date)).valueOf();
+      if (dateDifference) return dateDifference;
+      const bId = (b as Record<string, unknown>).id;
+      const aId = (a as Record<string, unknown>).id;
+      const aKey = `${a.eventKind}:${String(aId)}`;
+      const bKey = `${b.eventKind}:${String(bId)}`;
+      return aKey === bKey ? 0 : aKey > bKey ? -1 : 1;
+    });
+    const page = timeline.slice(0, limit);
+    result.timeline = page;
+    result.next_cursor = page.length
+      ? encodePageCursor(
+          new Date(String(page.at(-1)?.date)),
+          `${String(page.at(-1)?.eventKind)}:${String((page.at(-1) as Record<string, unknown>)?.id)}`
+        )
+      : null;
+    result.has_more = timeline.length > limit || ["tasks", "points", "redemptions"]
+      .some((selectedKind) => pageHasMore.get(selectedKind));
+    return result;
+  }
+  const dateField = {
+    tasks: "updatedAt",
+    points: "createdAt",
+    redemptions: "redeemedAt",
+    audit: "createdAt"
+  } as const;
+  const selectedKinds = [kind] as Array<"tasks" | "points" | "redemptions" | "audit">;
+  const selectedKind = selectedKinds[0];
+  const selectedRows = (result[selectedKind] as Array<Record<string, unknown>> | undefined) ?? [];
+  const last = selectedRows.at(-1);
+  result.next_cursor = last
+    ? encodePageCursor(
+        new Date(String(last[dateField[selectedKind]])),
+        `${selectedKind}:${String(last.id)}`
+      )
+    : null;
+  result.has_more = selectedKinds.some((selectedKind) => pageHasMore.get(selectedKind));
   return result;
 }
 
@@ -1022,7 +1281,7 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
   }
 
   return db.transaction(async (tx: Db) =>
-    idempotent(tx, "manage_rewards", input.idempotency_key, async () => {
+    idempotent(tx, "manage_rewards", input.idempotency_key, input, async () => {
       if (input.action === "create") {
         const id = createId("reward");
         const [reward] = await tx
@@ -1085,7 +1344,7 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
 
 export async function redeemReward(rewardId: string, idempotencyKey: string) {
   return getDb().transaction(async (tx: Db) =>
-    idempotent(tx, "redeem_reward", idempotencyKey, async () => {
+    idempotent(tx, "redeem_reward", idempotencyKey, { reward_id: rewardId }, async () => {
       const settings = await getSettings(tx);
       const reward = assertFound(
         await tx.query.rewardItems.findFirst({ where: and(eq(rewardItems.id, rewardId), eq(rewardItems.active, true)) }),
@@ -1113,6 +1372,19 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
         redemptionId: id
       });
       await audit(tx, "user", "reward.redeemed", "redemption", id, `Redeemed “${presentedReward.name}”`, { cost: reward.cost });
+      await emitDomainEvent(tx, {
+        type: "redemption.created",
+        aggregateType: "redemption",
+        aggregateId: id,
+        actor: "user",
+        dedupeKey: `redemption.created:${id}`,
+        payload: {
+          redemption_id: id,
+          reward_id: reward.id,
+          status: "pending",
+          cost: reward.cost
+        }
+      });
       await recomputeActivityAndStats(tx);
       return { redemption, balance: balance - reward.cost };
     })
@@ -1121,7 +1393,7 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
 
 export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI") {
   return getDb().transaction(async (tx: Db) =>
-    idempotent(tx, "adjust_points", input.idempotency_key, async () => {
+    idempotent(tx, "adjust_points", input.idempotency_key, input, async () => {
       const settings = await getSettings(tx);
       const now = new Date();
       const today = localDate(now, settings.timezone);

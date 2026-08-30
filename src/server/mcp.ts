@@ -139,10 +139,11 @@ function createMcpServer() {
 
   server.tool(
     "query_history",
-    "Query completed/final tasks, point ledger, redemptions, or audit history.",
+    "Query completed/final tasks, point ledger, redemptions, audit history, or the durable domain event feed. For event consumption, start with after_sequence=0 and persist the returned next_sequence cursor.",
     {
-      kind: z.enum(["all", "tasks", "points", "redemptions", "audit"]).default("all"),
-      limit: z.number().int().min(1).max(100).default(30)
+      kind: z.enum(["all", "tasks", "points", "redemptions", "audit", "events"]).default("all"),
+      limit: z.number().int().min(1).max(100).default(30),
+      after_sequence: z.number().int().min(0).optional()
     },
     async (args) => result(await queryHistory(args))
   );

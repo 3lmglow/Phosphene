@@ -1,164 +1,199 @@
 # 故障排查
 
-先确认三个基础事实：
+先记录：
 
-1. 网站地址是域名根路径，例如 `https://example.zeabur.app/`；
-2. MCP 地址是在同一域名后加 `/mcp`；
-3. 持久卷挂在 Phosphene App 服务的 `/data`。
+- Phosphene commit 或镜像标签
+- 部署方式与实例规格
+- `/data` 挂载位置
+- `/healthz` 响应
+- 第一条错误及其相邻日志
 
-## 部署一直 Crash / Restarting
+日志和问题报告中不要包含密码、AI Token、Webhook 密钥、Cookie、任务正文或证据图片。
 
-按运行日志从上到下找第一条错误，不要只看最后一条“进程退出”。
+## 服务无法启动
 
-### `Phosphene cannot write to /data`
+### `/healthz` 不可用或容器反复重启
 
-应用以非 root 的 `node` 用户运行，卷必须允许它写入。
+按顺序检查：
 
-- 确认卷挂载路径是 `/data`；
-- 确认挂载对象是 Phosphene App，而不是其他服务；
-- 若使用自建 Docker 主机，检查 bind mount 目录权限；优先改用 Docker 命名卷；
-- 修正后重新部署，不要把数据目录改去 `/tmp` 绕过检查。
+1. 构建是否成功。
+2. 运行日志中的第一条错误。
+3. `/data` 是否挂载到当前服务。
+4. 服务用户是否能写入 `/data`。
+5. 卷是否有剩余空间。
+6. 实例是否触发内存上限。
 
-### `PHOSPHENE_DATA_DIR must be an absolute path`
+### `EACCES` / permission denied
 
-生产环境的数据根目录必须是绝对路径。Zeabur 一般不需要设置这个变量；删除错误的自定义值，让镜像默认使用 `/data`。
+ready 之前报数据库或上传目录权限错误，说明运行用户不能写入持久卷。检查卷挂载对象与平台权限，不要把数据库路径临时改到容器其他目录。
 
-### `SQLITE_PATH and LOCAL_STORAGE_PATH must stay inside PHOSPHENE_DATA_DIR`
+### `ENOMEM` / out of memory
 
-数据库和图片被配置到了持久化根目录之外。Zeabur 上通常应删除这两个覆盖变量。需要自定义时，使用类似：
+查看平台 Metrics，判断是应用内存峰值还是平台直接终止容器。图片提交和大型 ZIP 恢复需要更多内存与磁盘空间；先保留现有卷，再提高实例规格或减小单次操作。
 
-```text
-PHOSPHENE_DATA_DIR=/data
-SQLITE_PATH=/data/phosphene.sqlite
-LOCAL_STORAGE_PATH=/data/uploads
-```
+### `ENOSPC` / no space left on device
 
-### 内存不足 / OOM / Exit 137
+扩容 `/data`。恢复期间 ZIP、当前图片和备份图片会同时占空间，估算方法见 [备份与恢复](BACKUP.md)。
 
-- 普通启动建议至少 512 MB 内存；
-- ZIP 已采用流式导出和磁盘恢复；若仍在该操作期间 OOM，记录 ZIP 大小与 Metrics 后提交问题；
-- 若错误发生在图片提交时，确认单张不超过 10 MB、总数不超过 4 张；
-- 查看 Zeabur Metrics，区分 Node 堆限制与平台容器内存上限。
+## 重新部署后回到首次设置
 
-### `ENOSPC` / No space left on device
+这表示应用打开了新的空数据库，而不是普通登录失效。
 
-恢复期间上传 ZIP、旧图片和新图片会短暂同时存在。先保留或回挂恢复前卷快照，再扩容 `/data`；
-不要通过手工删除 `/data/uploads` 腾空间。容量估算见 [备份与恢复](BACKUP.md)。
+检查：
 
-## 部署或重启后回到首次设置页
+1. 持久卷是否仍存在。
+2. Mount Directory 是否精确为 `/data`。
+3. 卷是否挂在当前 Phosphene 服务。
+4. 新部署是否创建了另一块卷。
+5. ready 日志中的 `dataDir` 是否为 `/data`。
 
-这通常不是登录 Cookie 失效，而是应用打开了一个新的空数据库。
+先尝试重新挂回原卷，不要在空数据库上再次认领后继续使用。
 
-1. 检查是否存在持久卷；
-2. 检查挂载路径是否精确为 `/data`；
-3. 检查新部署是否仍使用同一个卷，而不是创建了同名的新卷；
-4. 查看 ready 日志的 `dataDir`；
-5. 不要再次认领并继续使用，先确认旧卷是否仍可重新挂回。
+Restart 保留数据、Redeploy 丢数据时，之前使用的是容器临时文件系统。
 
-如果只执行 Restart 数据仍在、Redeploy 后消失，几乎可以确定此前使用的是容器临时文件系统。
-
-## 网站可以打开，但 MCP 连不上
+## MCP 连接
 
 ### 浏览器打开 `/mcp` 显示 405
 
-正常。Streamable HTTP MCP 使用 POST；浏览器地址栏发的是 GET。健康检查访问 `/healthz`，工具握手交给 MCP 客户端。
+正常。浏览器发送 GET，Streamable HTTP MCP 使用 POST。健康检查访问 `/healthz`。
 
 ### `401 ai_token_required`
 
-- Header 名应为 `Authorization` 或 `X-Phosphene-MCP-Token`；
-- Bearer 写法必须是 `Bearer`、一个空格、完整 Token；
-- Header 应配置在 AI 客户端或自建 AI 后端，不是在 Phosphene 的 Zeabur 环境变量中。
+- 检查是否发送了 `Authorization` 或 `X-Phosphene-MCP-Token`
+- Bearer 格式是 `Bearer`、一个空格、完整 Token
+- Header 配置在 AI 客户端，而不是 Phosphene 服务端环境变量
 
 ### `401 invalid_ai_token`
 
-- 检查是否漏复制 Token 的末尾；
-- 检查网站中是否已经轮换 Token；轮换后旧 Token 全部失效；
-- 完整 Token 无法从数据库找回，只能再次轮换并更新客户端。
+- 检查 Token 是否复制完整
+- 确认网站中没有轮换过 Token
+- 原 Token 无法找回；需要时再次轮换并更新客户端
 
 ### `401 conflicting_ai_token`
 
-客户端同时发送了两个不同的 Token。只保留一个 Header，或确保两处值完全相同。
+客户端同时发送了两个不同 Token。只保留一个 Header，或让两处值一致。
 
 ### 已连接但没有工具
 
-- Transport 选择 Streamable HTTP / HTTP，不是旧 SSE；
-- URL 必须以 `/mcp` 结尾；
-- 客户端若只支持 stdio，使用仓库的 `dist/server/stdio-bridge.js`；
-- 先调用 `get_overview` 验证工具列表和权限。
+- URL 以 `/mcp` 结尾
+- Transport 是 Streamable HTTP / HTTP，不是旧 SSE
+- stdio-only 客户端使用仓库的 `dist/server/stdio-bridge.js`
+- 调用 `get_overview` 验证连接
 
-## 网站登录或写操作失败
+完整配置见 [MCP 连接与工具](MCP.md)。
 
-### 登录反复提示密码错误
+## 网站登录与写操作
 
-- 密码区分大小写；
-- Phosphene 没有找回密码或邮件重置入口；
-- 不要删除数据库来“重置密码”，这会同时删除业务数据；
-- 如果仍有已登录设备，可先导出数据和创建卷快照，再决定恢复方案。
+### 密码始终错误
 
-### 页面提示安全令牌 / CSRF 错误
+密码区分大小写。Phosphene 没有邮件找回入口，也不会保存密码原文。
 
-- 刷新页面重新取得 Cookie；
-- 确认浏览器没有只拦截 `phosphene_csrf` Cookie；
-- 确认网站始终通过同一个 HTTPS 域名访问，不要在 IP、HTTP 和域名之间切换；
-- 清除该站点 Cookie 后需要重新登录。
+如果还有已登录设备，先导出网站 ZIP 并创建卷快照。删除数据库会同时删除全部业务数据，不是密码重置方式。
 
-### Token 轮换按钮没有反应
+### CSRF 或安全令牌错误
 
-新版页面会显示具体错误。确认会话未过期，然后刷新并重试。轮换成功后务必立即保存新 Token；页面不会再次展示原文。
+1. 刷新页面。
+2. 确认浏览器允许该站点保存 Cookie。
+3. 始终从同一个 HTTPS 域名访问。
+4. 清除该站点 Cookie 后重新登录。
 
-## 图片问题
+### AI Token 轮换后客户端失效
+
+轮换会立即撤销旧 Token。把新 Token 更新到每个 MCP 客户端，并重启需要重新读取环境变量的客户端。
+
+## 任务与图片
+
+### 每日任务没有出现
+
+- 检查系列是否暂停或已经超过结束日期
+- 检查实例时区与当天日期
+- 调用 `get_overview` 或刷新任务页触发 reconciliation
+- 查看任务是否已被取消、完成或逾期
+
+### 暂停系列后历史任务变化
+
+当前实现只取消当地今天及未来尚未提交的任务。已提交、已完成和过去的任务应保持不变。若不符合，保留系列 id、任务 id 与相关审计记录。
 
 ### 图片提交被拒绝
 
-支持真实 JPEG、PNG、WebP；扩展名正确但内容不是图片也会被拒绝。每次最多 4 张、单张最多 10 MB、像素总数最多 2400 万。HEIC/HEIF 需要先在设备上转换。
+支持真实 JPEG、PNG 与 WebP。每次最多 4 张，单张最多 10 MB，单图最多 2400 万像素。HEIC/HEIF 需要先转换。
 
 ### AI 看不到图片
 
-AI 必须通过 `query_tasks(status="submitted", include_proof=true)` 查询，服务端才会附带审核预览。AI 新建任务只开放 `none`、`text`、`text_and_image`，因此需要图片时也会同时有文字证据。
+AI 使用：
 
-### ZIP 恢复返回 `invalid_backup`
+```text
+query_tasks(status="submitted", include_proof=true)
+```
 
-- 只选择由自己实例导出的原始 ZIP，不要解压后重新打包；
-- 检查浏览器下载是否完整；
-- 旧 version 1 ZIP 仍受支持，不需要手工转换；
-- 保留恢复前卷快照和错误信息，不要连续上传来源不明的文件。
+图片预览以 MCP image content 返回。客户端本身也需要支持显示 MCP 图片内容。
 
-### 页面短暂返回 `503 backup_maintenance`
+## 完成通知
 
-导出或恢复开始后，Phosphene 会等待已进入的请求结束并短暂关闭业务入口，防止备份时间点
-不一致。等待当前操作完成即可；`/healthz` 仍应返回 200。若没有人在操作备份但状态长期不消失，
-检查服务是否正在重启或恢复是否因卷空间不足卡住。
+### 任务完成了，但 Webhook 没送达
 
-### 恢复后图片仍异常
+1. 打开“设置 → 完成通知”，确认已启用并订阅对应事件。
+2. 发送测试事件。
+3. 查看最近投递的 HTTP 状态与错误。
+4. 接收端应在 10 秒内返回 2xx。
+5. 停止重试的记录在修复接收端后手工重新排队。
 
-同一 ZIP 支持在原实例就地恢复，不会再因旧对象 Key 已存在而失败。先检查恢复是否明确返回成功，
-再打开历史任务验证；如果只有某张图片失败，保留 ZIP、任务 id 和相关日志并提交问题，不要删除
-整个 `/data/uploads`。
+关闭通知期间没有创建的 delivery 不会在重新启用后补发；AI 可以用 `query_history(kind="events")` 读取这些领域事件。
 
-## PWA 没更新或不能安装
+### 收到重复事件
 
-- PWA 安装需要 HTTPS，`localhost` 开发环境除外；
-- Android/Chrome/Edge 可用浏览器安装提示；
-- iPhone/iPad 使用 Safari“分享 → 添加到主屏幕”；
-- 更新后完全关闭已安装 PWA，再从浏览器打开网站刷新一次；
-- 离线缓存只保存应用壳层，不保存任务 API、MCP 或私有图片；断网时不能提交任务。
+Webhook 是 at-least-once 投递。以 `X-Phosphene-Event-Id` 或正文 `id` 去重，并对已处理事件继续返回 2xx。
 
-## 更新后出现数据库错误
+### HMAC 签名不匹配
 
-1. 停止反复重启，先保留当前 `/data` 卷；
-2. 记录失败版本、上一版本和第一条 migration 错误；
-3. 尝试回滚到上一应用部署；
-4. 若旧应用无法读取新结构，使用升级前的整卷快照恢复；
-5. 不要手工删除 Drizzle migration 记录或直接修改生产 SQLite 表。
+- 使用原始 HTTP body 字节
+- 签名输入是 `timestamp + "." + raw_body`
+- 算法是 HMAC-SHA256，Header 值带 `v1=` 前缀
+- 使用 Webhook 签名密钥，不是 AI Token
+- 密钥轮换后同步更新接收端
 
-## 提交问题时应提供什么
+完整协议见 [完成通知](WEBHOOKS.md)。
 
-可以提供：
+### 事件轮询反复提醒同一事件
 
-- Phosphene commit 或镜像标签；
-- 部署方式、内存大小、卷挂载路径；
-- 去除隐私后的第一条报错和相邻日志；
-- `/healthz` 的状态；
-- 问题发生在首次部署、更新、重启、MCP、图片还是恢复。
+- 每个消费者单独保存 `after_sequence`
+- 每个事件处理成功后，把游标推进到该事件的 `sequence`
+- 整页处理完成时，游标才应等于响应的 `next_sequence`
+- `has_more=true` 时从最后成功处理的 sequence 继续读取
+- 使用 event id 做最终去重
 
-不要提供网站密码、Setup Token、AI Token、Cookie、真实任务文字或证据图片。
+## 备份与恢复
+
+### `invalid_backup`
+
+- 确认 ZIP 由 Phosphene 导出且下载完整
+- 选择原始 ZIP，不要解压后重新打包
+- version 1 和 version 2 可以直接导入
+- 保留错误信息和恢复前卷快照
+
+### 页面返回 `503 backup_maintenance`
+
+导出或恢复正在使用维护锁。等待当前操作结束；`/healthz` 应继续返回 200。
+
+### 恢复后图片异常
+
+确认恢复明确返回成功，再定位具体任务与图片。保留 ZIP、任务 id 和相关日志。不要删除整个 `/data/uploads`。
+
+### 更新后出现 migration 错误
+
+1. 保留当前卷，不要持续重启。
+2. 记录失败版本、上一版本和第一条 migration 错误。
+3. 数据库兼容旧应用时回滚部署。
+4. 不兼容时恢复匹配的旧版本与升级前卷快照。
+
+## PWA
+
+### 不能安装
+
+PWA 需要 HTTPS，localhost 开发环境除外。Android、Chrome 和 Edge 使用浏览器安装入口；iPhone 与 iPad 使用 Safari“分享 → 添加到主屏幕”。
+
+### 更新后仍显示旧界面
+
+完全关闭已安装 PWA，再从浏览器打开网站并刷新一次。
+
+离线缓存只保存应用壳层，不保存任务 API、MCP 或私有图片；断网时不能查看或提交最新业务数据。
