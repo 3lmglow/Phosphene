@@ -6,7 +6,7 @@ autoInstallPeers: false
 overrides:
   '@hono/node-server': 2.0.10
   brace-expansion@^5.0.0: 5.0.9
-  fast-uri@^3.0.0: 3.1.5
+  fast-uri@^3.0.0: 3.1.6
   hono: 4.12.34
   ip-address@^10.0.0: 10.3.1
 
