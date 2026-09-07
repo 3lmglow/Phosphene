@@ -1977,8 +1977,7 @@ svg {
 .settings-title > span { align-self: start; padding: 5px 9px; color: #55725e; border-radius: 30px; background: #e4eee5; font-size: 8px; }
 .settings-form > .button { width: max-content; margin-top: 22px; }
 
-.boundary-callout,
-.tool-count {
+.boundary-callout {
   padding: 15px;
   display: flex;
   align-items: flex-start;
@@ -1989,14 +1988,10 @@ svg {
   background: #f2f7ee;
 }
 
-.boundary-callout svg,
-.tool-count svg { width: 19px; flex: none; }
-.boundary-callout div,
-.tool-count div { display: grid; gap: 4px; }
-.boundary-callout strong,
-.tool-count strong { font-size: 10px; }
-.boundary-callout span,
-.tool-count span { font-size: 8px; line-height: 1.6; opacity: .75; }
+.boundary-callout svg { width: 19px; flex: none; }
+.boundary-callout div { display: grid; gap: 4px; }
+.boundary-callout strong { font-size: 10px; }
+.boundary-callout span { font-size: 8px; line-height: 1.6; opacity: .75; }
 
 .range-label { display: flex; align-items: center; justify-content: space-between; color: var(--ink-faint); font-size: 8px; }
 .range-label strong { color: var(--plum); font-size: 13px; }
@@ -2054,7 +2049,6 @@ svg {
 .token-list strong { font-size: 10px; }
 .token-list small { color: var(--ink-faint); font-size: 8px; }
 .token-list code { color: var(--ink-faint); font-size: 8px; }
-.tool-count { margin-top: 22px; color: var(--plum); border-color: #e7d7df; background: #f9f0f4; }
 
 .data-action {
   margin-top: 12px;
@@ -2343,7 +2337,6 @@ svg {
 .delivery-state--dead_letter { background: #a5545c; box-shadow: 0 0 0 3px #f4e0e2; }
 
 @media (max-width: 720px) {
-  .settings-nav button:last-child { grid-column: auto; }
   .webhook-actions { display: grid; }
   .webhook-actions .button { width: 100%; justify-content: center; }
   .webhook-event-list > label { grid-template-columns: auto minmax(0, 1fr); }
@@ -3356,7 +3349,6 @@ body::before {
 
 .settings-title p,
 .boundary-callout span,
-.tool-count span,
 .switch-row span,
 .connection-card p,
 .token-list small,
@@ -3369,23 +3361,15 @@ body::before {
   font-size: 10px;
 }
 
-.boundary-callout,
-.tool-count {
+.boundary-callout {
   border-radius: 15px 15px 15px 6px;
 }
 
 .boundary-callout strong,
-.tool-count strong,
 .switch-row strong,
 .token-list strong,
 .data-action strong {
   font-size: 12px;
-}
-
-.tool-count {
-  color: var(--plum);
-  border-color: #d9d2e7;
-  background: #f0edf6;
 }
 
 .connection-card {
@@ -3665,10 +3649,6 @@ body::before {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .settings-nav button:last-child {
-    grid-column: 1 / -1;
-  }
-
   .settings-panel {
     padding: 24px 16px;
   }
@@ -3695,7 +3675,6 @@ body::before {
   }
 
   .boundary-callout,
-  .tool-count,
   .switch-row,
   .connection-card,
   .secret-box,

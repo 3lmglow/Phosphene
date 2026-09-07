@@ -1710,7 +1710,6 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
         ))}
       </div>
       <button className="button button--secondary" onClick={rotate} disabled={busy}><RotateCw size={17} />{busy ? "轮换中…" : "轮换 AI Token"}</button>
-      <div className="tool-count"><Sparkles /><div><strong>精简为恰好 7 个工具</strong><span>创建、查询、管理任务，概览、历史、奖励和积分调整。</span></div></div>
     </div>
   );
 }
