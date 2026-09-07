@@ -34,8 +34,15 @@ describe("simple optional recovery UI", () => {
 
   it("accepts a short Chinese answer and waits until final setup to save it", async () => {
     await startSetup();
+    const answerInput = screen.getByLabelText("密保答案") as HTMLInputElement;
+    const confirmInput = screen.getByLabelText("再次输入密保答案") as HTMLInputElement;
+    expect(answerInput.type).toBe("text");
+    expect(confirmInput.type).toBe("text");
     fill("密保问题", "名字？");
+    fireEvent.compositionStart(answerInput);
     fill("密保答案", "小明");
+    fireEvent.compositionEnd(answerInput, { data: "小明" });
+    expect(answerInput.value).toBe("小明");
     fill("再次输入密保答案", "小红");
     fireEvent.click(screen.getByRole("button", { name: /保存密保并继续/ }));
     expect(screen.getByRole("alert").textContent).toContain("不一致");
@@ -71,6 +78,8 @@ describe("simple optional recovery UI", () => {
     const onRecovered = vi.fn();
     render(<PasswordRecovery onBack={vi.fn()} onRecovered={onRecovered} />);
     await screen.findByText("我的生日？");
+    expect((screen.getByLabelText("密保答案") as HTMLInputElement).type).toBe("text");
+    expect((screen.getByLabelText(/新密码.*10/) as HTMLInputElement).type).toBe("password");
     fill("密保答案", "0101");
     fill(/新密码.*10/, "abcdefghij");
     fill("再次输入新密码", "abcdefghik");
@@ -91,6 +100,9 @@ describe("simple optional recovery UI", () => {
       .mockResolvedValueOnce({ enabled: false, question: null });
     render(<RecoverySettings />);
     await screen.findByLabelText("密保问题");
+    expect((screen.getByLabelText("密保答案") as HTMLInputElement).type).toBe("text");
+    expect((screen.getByLabelText("再次输入密保答案") as HTMLInputElement).type).toBe("text");
+    expect((screen.getByLabelText("确认当前密码") as HTMLInputElement).type).toBe("password");
     fill("密保问题", "名字？");
     fill("密保答案", "小明");
     fill("再次输入密保答案", "小明");

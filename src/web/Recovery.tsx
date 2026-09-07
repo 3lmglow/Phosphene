@@ -20,11 +20,11 @@ export function RecoveryFields({ value, onChange }: { value: RecoveryDraft; onCh
       <input required maxLength={200} value={value.question} onChange={(e) => onChange({ ...value, question: e.target.value })} placeholder="写一个你记得答案的问题" />
     </label>
     <label className="field"><span><strong>密保答案</strong></span>
-      <input required type="password" autoComplete="off" maxLength={256} value={value.answer} onChange={(e) => onChange({ ...value, answer: e.target.value })} aria-describedby="recovery-answer-hint" />
+      <input required type="text" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={256} value={value.answer} onChange={(e) => onChange({ ...value, answer: e.target.value })} aria-describedby="recovery-answer-hint" />
     </label>
     <p className="muted" id="recovery-answer-hint">{RECOVERY_ANSWER_HINT}</p>
     <label className="field"><span><strong>再次输入密保答案</strong></span>
-      <input required type="password" autoComplete="off" maxLength={256} value={value.confirm} onChange={(e) => onChange({ ...value, confirm: e.target.value })} />
+      <input required type="text" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={256} value={value.confirm} onChange={(e) => onChange({ ...value, confirm: e.target.value })} />
     </label>
     <p className="muted">{RECOVERY_NOTICE} 问题会显示在找回页，答案不会公开。</p>
   </>;
@@ -68,7 +68,7 @@ export function PasswordRecovery({ onBack, onRecovered }: { onBack: () => void; 
       <p className="muted">回答设置时保存的问题，然后为这个空间设置新密码。</p>
       <div className="notice-banner recovery-question"><strong>你的密保问题</strong><p>{status.question}</p></div>
       <label className="field"><span><strong>密保答案</strong></span>
-        <input autoFocus required type="password" autoComplete="off" maxLength={256} value={answer} onChange={(e) => setAnswer(e.target.value)} />
+        <input autoFocus required type="text" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={256} value={answer} onChange={(e) => setAnswer(e.target.value)} />
       </label>
       <p className="muted">{RECOVERY_ANSWER_HINT}</p>
       <label className="field"><span><strong>新密码</strong><small>10–256 个字符</small></span>
