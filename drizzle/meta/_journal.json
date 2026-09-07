@@ -29,6 +29,13 @@
       "when": 1788066000824,
       "tag": "0003_sudden_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788793906853,
+      "tag": "0004_password_recovery",
+      "breakpoints": true
     }
   ]
 }

@@ -100,6 +100,10 @@ export const userAccount = sqliteTable(
   {
     id: integer("id").primaryKey().default(1),
     passwordHash: text("password_hash").notNull(),
+    recoveryQuestion: text("recovery_question"),
+    recoveryAnswerHash: text("recovery_answer_hash"),
+    recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    recoveryWindowStartedAt: integer("recovery_window_started_at", { mode: "timestamp_ms" }),
     passwordChangedAt: integer("password_changed_at", { mode: "timestamp_ms" })
       .notNull()
       .default(nowInMilliseconds),

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Request, Response } from "express";
 import { z } from "zod";
+import { version } from "../../package.json";
 import {
   AI_PROOF_REQUIREMENTS,
   RECURRENCE_MODES,
@@ -62,7 +63,7 @@ async function taskResultWithProofImages(data: any) {
 
 function createMcpServer() {
   const server = new McpServer(
-    { name: "Phosphene", version: "1.0.0" },
+    { name: "Phosphene", version },
     { capabilities: { logging: {} } }
   );
 

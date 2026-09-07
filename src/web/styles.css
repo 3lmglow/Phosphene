@@ -2208,6 +2208,20 @@ svg {
   .bottom-nav a.active { color: var(--plum); }
 }
 
+.recovery-settings {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.recovery-question {
+  overflow-wrap: anywhere;
+}
+
+.recovery-question p {
+  margin-bottom: 0;
+}
+
 @media (max-width: 420px) {
   .hero-grid { display: grid; }
   .balance-card { grid-column: span 1; }

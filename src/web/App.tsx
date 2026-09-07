@@ -54,6 +54,7 @@ import { SUPPORTED_TIMEZONES, TIMEZONE_OPTIONS } from "../shared/constants";
 import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
+import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
 
 type Bootstrap = {
   initialized: boolean;
@@ -220,6 +221,8 @@ function SetupPage({
     ai_label: "AI"
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [recovery, setRecovery] = useState(emptyRecoveryDraft);
+  const [recoveryEnabled, setRecoveryEnabled] = useState(false);
 
   function credentialError() {
     if (setupProtected && !form.setup_token.trim()) return "请输入部署时设置的 Setup Token。";
@@ -241,12 +244,19 @@ function SetupPage({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (busy) return;
+    if (step === 1) { continueSetup(); return; }
+    if (step === 2) { continueRecovery(); return; }
     setError("");
     const message = credentialError();
     if (message) {
       setError(message);
       setStep(1);
       return;
+    }
+    if (recoveryEnabled) {
+      const recoveryError = recoveryDraftError(recovery);
+      if (recoveryError) { setError(recoveryError); setStep(2); return; }
     }
     setBusy(true);
     try {
@@ -255,13 +265,14 @@ function SetupPage({
         body: {
           setup_token: form.setup_token,
           password: form.password,
+          ...(recoveryEnabled ? { recovery: { question: recovery.question, answer: recovery.answer } } : {}),
           timezone: form.timezone,
           user_label: form.user_label,
           ai_label: form.ai_label
         }
       });
       setTokenResult(result);
-      setStep(3);
+      setStep(4);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "设置没有完成。");
     } finally {
@@ -269,7 +280,15 @@ function SetupPage({
     }
   }
 
-  if (step === 3 && tokenResult) {
+  function continueRecovery() {
+    const message = recoveryDraftError(recovery);
+    if (message) { setError(message); return; }
+    setRecoveryEnabled(true);
+    setError("");
+    setStep(3);
+  }
+
+  if (step === 4 && tokenResult) {
     return (
       <AuthBackdrop eyebrow="准备完成" title="现在，信号已经亮了。" copy={`这是 ${form.ai_label} 连接 Phosphene 的唯一凭证。它只展示这一次。`}>
         <div className="auth-form">
@@ -307,26 +326,26 @@ function SetupPage({
     >
       <form className="auth-form" onSubmit={submit}>
         <div className="step-row">
-          {[1, 2].map((item) => (
+          {[1, 2, 3].map((item) => (
             <span key={item} className={step >= item ? "active" : ""}>
               {item}
             </span>
           ))}
         </div>
-        <p className="step-label">首次设置 · {step}/2</p>
+        <p className="step-label">首次设置 · {step}/3</p>
         <h2>
           {step === 1
             ? setupProtected
               ? "先确认这是你的空间"
               : "认领你的 Phosphene"
-            : "再告诉我，怎么称呼你们"}
+            : step === 2 ? "留一个找回密码的办法" : "再告诉我，怎么称呼你们"}
         </h2>
         <p className="muted">
           {step === 1
             ? setupProtected
               ? "这个实例启用了 Setup Token 保护，验证后才能设置唯一的登录密码。"
               : "这是一个尚未认领的新实例。设置密码并完成初始化后，首次设置入口会永久关闭。"
-            : "这些称呼只影响页面展示，不会改变连接权限与数据边界。"}
+            : step === 2 ? "设置一个自己的密保问题，忘记密码时可以用答案找回。此步骤可跳过，以后也能在登录安全中补设。" : "这些称呼只影响页面展示，不会改变连接权限与数据边界。"}
         </p>
         {error && <InlineError message={error} />}
         {step === 1 ? (
@@ -378,6 +397,16 @@ function SetupPage({
               继续 <ArrowRight size={17} />
             </button>
           </>
+        ) : step === 2 ? (
+          <>
+            <RecoveryFields value={recovery} onChange={setRecovery} />
+            <button type="button" className="button button--primary button--wide" onClick={continueRecovery}>保存密保并继续 <ArrowRight size={17} /></button>
+            <div className="button-row">
+              <button type="button" className="button button--ghost" onClick={() => { setError(""); setStep(1); }}>返回</button>
+              <button type="button" className="button button--ghost" onClick={() => { setRecoveryEnabled(false); setRecovery(emptyRecoveryDraft); setError(""); setStep(3); }}>暂时跳过</button>
+            </div>
+            <p className="muted">跳过后暂时无法通过密保找回密码，请保存好登录密码。</p>
+          </>
         ) : (
           <>
             <div className="field-grid">
@@ -403,7 +432,7 @@ function SetupPage({
               />
             </Field>
             <div className="button-row">
-              <button type="button" className="button button--ghost" onClick={() => setStep(1)}>
+              <button type="button" className="button button--ghost" onClick={() => { setError(""); setStep(2); }}>
                 返回
               </button>
               <button className="button button--primary button--grow" disabled={busy}>
@@ -413,7 +442,7 @@ function SetupPage({
           </>
         )}
         <p className="security-note">
-          <ShieldCheck size={15} /> 密码使用 Argon2id 加密；Phosphene 不提供找回密码入口。
+          <ShieldCheck size={15} /> 密码与密保答案只保存 Argon2id 哈希，不保存原文。
         </p>
       </form>
     </AuthBackdrop>
@@ -425,6 +454,8 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  const [message, setMessage] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -438,6 +469,11 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
       setBusy(false);
     }
   }
+  if (recovering) return (
+    <AuthBackdrop eyebrow="FIND YOUR WAY BACK" title="换一把钥匙，回到原来的空间。" copy="密保只用于重置登录密码，不会清空任务、积分或你们留下的记录。">
+      <PasswordRecovery onBack={() => setRecovering(false)} onRecovered={() => { setRecovering(false); setPassword(""); setError(""); setMessage("密码已重置，请使用新密码登录。"); }} />
+    </AuthBackdrop>
+  );
   return (
     <AuthBackdrop eyebrow="WELCOME BACK" title="你回来了，信号还在。" copy="待完成的约定、累积的分数，还有那条仍在延伸的轨迹，都留在原处等你。">
       <form className="auth-form" onSubmit={submit}>
@@ -445,6 +481,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         <h2>进入 Phosphene</h2>
         <p className="muted">这里没有用户名，因为这一份空间只属于一个人。</p>
         {error && <InlineError message={error} />}
+        {message && <div className="notice-banner" role="status">{message}</div>}
         <Field label="密码">
           <div className="input-with-icon">
             <input
@@ -463,6 +500,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         <button className="button button--primary button--wide" disabled={busy}>
           {busy ? "正在确认…" : "进入"} <ArrowRight size={17} />
         </button>
+        <button type="button" className="button button--ghost button--wide" disabled={busy} onClick={() => { setError(""); setMessage(""); setRecovering(true); }}>忘记密码？</button>
         <p className="security-note">
           <LockKeyhole size={15} /> 会话使用安全 Cookie 保存在这台设备上。
         </p>
@@ -1550,7 +1588,7 @@ function SettingsPage({
                   onInstall={onInstall}
                 />
               )}
-              {tab === "security" && <SecuritySettings />}
+              {tab === "security" && <><SecuritySettings /><RecoverySettings /></>}
             </>
           )}
         </section>

@@ -23,6 +23,7 @@ import { AppError, assertFound } from "./errors";
 import { createId } from "./lib/ids";
 import {
   changePassword,
+  clearSessionCookies,
   listAiTokens,
   login,
   logout,
@@ -32,6 +33,7 @@ import {
   setupApplication,
   verifyPassword
 } from "./services/auth";
+import { getRecoveryStatus, resetPasswordWithRecovery, saveRecoverySettings } from "./services/recovery";
 import {
   MAX_BACKUP_ARCHIVE_BYTES,
   restoreBackupFromFile,
@@ -66,6 +68,13 @@ const authLimiter = rateLimit({
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false
+});
+const recoveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { ok: false, error: { code: "recovery_rate_limited", message: "请求过于频繁，请 15 分钟后再试。" } }
 });
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -120,6 +129,17 @@ router.post(
   })
 );
 
+router.get("/recovery", asyncRoute(async (_request, response) => {
+  response.set("Cache-Control", "no-store");
+  response.json({ ok: true, data: await getRecoveryStatus() });
+}));
+
+router.post("/recovery/reset", recoveryLimiter, asyncRoute(async (request, response) => {
+  await resetPasswordWithRecovery(request.body);
+  clearSessionCookies(response);
+  response.json({ ok: true, data: { login_required: true } });
+}));
+
 router.use(requireUser);
 router.use(
   asyncRoute(async (request, _response, next) => {
@@ -132,6 +152,10 @@ router.use(requireCsrf);
 router.get("/me", (_request, response) => {
   response.json({ ok: true, data: { authenticated: true } });
 });
+
+router.put("/recovery", authLimiter, asyncRoute(async (request, response) => {
+  response.json({ ok: true, data: await saveRecoverySettings(request.body) });
+}));
 
 router.post(
   "/logout",

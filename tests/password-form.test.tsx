@@ -37,6 +37,8 @@ describe("password form guidance and feedback", () => {
     fireEvent.change(confirm, { target: { value: "0123456789" } });
     fireEvent.click(screen.getByRole("button", { name: "继续" }));
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("留一个找回密码的办法")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "暂时跳过" }));
     expect(screen.getByText("再告诉我，怎么称呼你们")).toBeTruthy();
   });
 

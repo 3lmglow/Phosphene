@@ -1,6 +1,7 @@
 import argon2 from "argon2";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import type { CookieOptions, NextFunction, Request, Response } from "express";
+import { recoveryQuestionSchema, type RecoveryQuestion } from "../../shared/recovery";
 import { config } from "../config";
 import { getDb } from "../db/client";
 import { aiTokens, appSettings, auditLogs, sessions, userAccount } from "../db/schema";
@@ -45,7 +46,7 @@ async function issueSession(response: Response, database: any = getDb()) {
 }
 
 export async function setupApplication(
-  values: { setup_token: string; password: string; timezone: string; user_label: string; ai_label: string },
+  values: { setup_token: string; password: string; timezone: string; user_label: string; ai_label: string; recovery?: RecoveryQuestion },
   response: Response
 ) {
   if (!acceptsSetupToken(config.PHOSPHENE_SETUP_TOKEN, values.setup_token)) {
@@ -55,6 +56,8 @@ export async function setupApplication(
   const settings = assertFound(await db.query.appSettings.findFirst({ where: eq(appSettings.id, 1) }));
   assertState(!settings.initialized, "already_initialized", "Phosphene has already been set up");
   const passwordHash = await argon2.hash(values.password, { type: argon2.argon2id });
+  const recovery = values.recovery ? recoveryQuestionSchema.parse(values.recovery) : undefined;
+  const recoveryAnswerHash = recovery ? await argon2.hash(recovery.answer, { type: argon2.argon2id }) : null;
   return db.transaction(async (tx: any) => {
     const [claimed] = await tx
       .update(appSettings)
@@ -68,7 +71,7 @@ export async function setupApplication(
       .where(and(eq(appSettings.id, 1), eq(appSettings.initialized, false)))
       .returning({ id: appSettings.id });
     assertState(claimed, "already_initialized", "Phosphene has already been set up");
-    await tx.insert(userAccount).values({ id: 1, passwordHash });
+    await tx.insert(userAccount).values({ id: 1, passwordHash, recoveryQuestion: recovery?.question ?? null, recoveryAnswerHash });
     const aiToken = `phosphene_ai_${createSecret(32)}`;
     const aiTokenId = createId("aitoken");
     await tx.insert(aiTokens).values({
@@ -98,7 +101,11 @@ export async function login(password: string, response: Response) {
   const account = assertFound(await db.query.userAccount.findFirst({ where: eq(userAccount.id, 1) }), "Account not initialized");
   const valid = await argon2.verify(account.passwordHash, password);
   if (!valid) throw new AppError(401, "invalid_credentials", "Password is incorrect");
-  return issueSession(response);
+  return db.transaction(async (tx: any) => {
+    const current = await tx.query.userAccount.findFirst({ where: eq(userAccount.id, 1) });
+    assertState(current?.passwordHash === account.passwordHash, "credentials_changed", "密码已变化，请重新登录。");
+    return issueSession(response, tx);
+  });
 }
 
 export async function logout(request: Request, response: Response) {
@@ -109,6 +116,10 @@ export async function logout(request: Request, response: Response) {
       .set({ revokedAt: new Date() })
       .where(eq(sessions.tokenHash, tokenHash(raw)));
   }
+  clearSessionCookies(response);
+}
+
+export function clearSessionCookies(response: Response) {
   response.clearCookie(SESSION_COOKIE, { path: "/" });
   response.clearCookie(CSRF_COOKIE, { path: "/" });
 }
@@ -226,7 +237,11 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
   const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
   await db.transaction(async (tx: any) => {
-    await tx.update(userAccount).set({ passwordHash, passwordChangedAt: new Date(), updatedAt: new Date() }).where(eq(userAccount.id, 1));
+    const [updated] = await tx.update(userAccount)
+      .set({ passwordHash, passwordChangedAt: new Date(), updatedAt: new Date(), recoveryAttempts: 0, recoveryWindowStartedAt: null })
+      .where(and(eq(userAccount.id, 1), eq(userAccount.passwordHash, account.passwordHash)))
+      .returning({ id: userAccount.id });
+    assertState(updated, "credentials_changed", "密码已变化，请重新登录后再试。");
     await tx.update(sessions).set({ revokedAt: new Date() }).where(isNull(sessions.revokedAt));
   });
 }

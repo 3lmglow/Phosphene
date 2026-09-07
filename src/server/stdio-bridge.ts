@@ -1,4 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { version } from "../../package.json";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -35,11 +36,11 @@ const remoteTransport = new StreamableHTTPClientTransport(endpoint, {
   requestInit: headers ? { headers } : undefined
 });
 const remoteClient = new Client(
-  { name: "phosphene-stdio-bridge", version: "1.0.0" },
+  { name: "phosphene-stdio-bridge", version },
   { capabilities: {} }
 );
 const localServer = new Server(
-  { name: "Phosphene", version: "1.0.0" },
+  { name: "Phosphene", version },
   {
     capabilities: { tools: {} },
     instructions:

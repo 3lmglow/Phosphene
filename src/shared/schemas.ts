@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { recoveryAnswerSchema, recoveryQuestionSchema } from "./recovery";
 import {
   PROOF_REQUIREMENTS,
   RECURRENCE_MODES,
@@ -242,9 +243,20 @@ export const changePasswordSchema = z.object({
   new_password: newPasswordSchema
 });
 
+export const resetPasswordSchema = z.object({
+  answer: recoveryAnswerSchema,
+  new_password: newPasswordSchema
+});
+
+export const recoverySettingsSchema = z.object({
+  current_password: z.string().min(1).max(256),
+  recovery: recoveryQuestionSchema.nullable()
+});
+
 export const setupSchema = z.object({
   setup_token: z.string().max(512).optional().default(""),
   password: newPasswordSchema,
+  recovery: recoveryQuestionSchema.optional(),
   timezone,
   user_label: z.string().trim().min(1).max(40).default("You"),
   ai_label: z.string().trim().min(1).max(40).default("AI")

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { version } from "../../package.json";
 import cookieParser from "cookie-parser";
 import express from "express";
 import helmet from "helmet";
@@ -69,7 +70,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: false, limit: "2mb" }));
 
 app.get("/healthz", (_request, response) => {
-  response.json({ status: "ok", version: "1.0.0" });
+  response.json({ status: "ok", version });
 });
 app.use((request, response, next) => {
   const backupRoute =
