@@ -7,6 +7,7 @@ import multer from "multer";
 import { z } from "zod";
 import { MAX_PROOF_IMAGE_BYTES, MAX_PROOF_IMAGES } from "../shared/constants";
 import {
+  changePasswordSchema,
   loginSchema,
   paginationCursorSchema,
   settingsSchema,
@@ -391,12 +392,7 @@ router.put(
   "/password",
   authLimiter,
   asyncRoute(async (request, response) => {
-    const input = z
-      .object({
-        current_password: z.string().min(1).max(256),
-        new_password: z.string().min(10).max(256)
-      })
-      .parse(request.body);
+    const input = changePasswordSchema.parse(request.body);
     await changePassword(input.current_password, input.new_password);
     response.json({ ok: true, data: { login_required: true } });
   })

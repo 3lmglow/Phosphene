@@ -52,6 +52,7 @@ import {
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { SUPPORTED_TIMEZONES, TIMEZONE_OPTIONS } from "../shared/constants";
 import { presentRewardSnapshot } from "../shared/rewards";
+import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
 
 type Bootstrap = {
@@ -222,8 +223,8 @@ function SetupPage({
 
   function credentialError() {
     if (setupProtected && !form.setup_token.trim()) return "请输入部署时设置的 Setup Token。";
-    if (form.password.length < 10) return "登录密码至少需要 10 个字符。";
-    if (form.password.length > 256) return "登录密码不能超过 256 个字符。";
+    const passwordResult = newPasswordSchema.safeParse(form.password);
+    if (!passwordResult.success) return passwordResult.error.issues[0].message;
     if (form.password !== form.passwordConfirm) return "两次输入的密码不一致。";
     return "";
   }
@@ -341,13 +342,15 @@ function SetupPage({
                 />
               </Field>
             )}
-            <Field label="登录密码" hint="至少 10 个字符">
+            <Field label="登录密码" hint="10–256 个字符">
               <div className="input-with-icon">
                 <input
                   autoFocus={!setupProtected}
                   required
                   minLength={10}
                   maxLength={256}
+                  autoComplete="new-password"
+                  aria-describedby="setup-password-rules"
                   type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(event) => setForm({ ...form, password: event.target.value })}
@@ -358,11 +361,13 @@ function SetupPage({
                 </button>
               </div>
             </Field>
+            <p id="setup-password-rules" className="muted">{PASSWORD_REQUIREMENTS}</p>
             <Field label="再次输入密码">
               <input
                 required
                 minLength={10}
                 maxLength={256}
+                autoComplete="new-password"
                 type={showPassword ? "text" : "password"}
                 value={form.passwordConfirm}
                 onChange={(event) => setForm({ ...form, passwordConfirm: event.target.value })}
@@ -1916,20 +1921,30 @@ function SecuritySettings() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
+    setMessage("");
+    setError("");
+    const passwordResult = newPasswordSchema.safeParse(next);
+    if (!passwordResult.success) {
+      setError(passwordResult.error.issues[0].message);
+      return;
+    }
     try {
       await api("/password", { method: "PUT", body: { current_password: current, new_password: next } });
       setMessage("密码已更新。所有会话已退出，请重新登录。");
       setTimeout(() => location.reload(), 1200);
-    } catch (reason) { setMessage(reason instanceof Error ? reason.message : "修改失败"); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "修改失败"); }
   }
   return (
     <form className="settings-form" onSubmit={submit}>
       <div className="settings-title"><div><h2>登录安全</h2><p>更改密码会撤销所有设备上的网站会话，但不会轮换 AI Token。</p></div></div>
       {message && <div className="notice-banner">{message}</div>}
-      <Field label="当前密码"><input type="password" required value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
-      <Field label="新密码" hint="至少 10 个字符"><input type="password" minLength={10} required value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+      {error && <InlineError message={error} />}
+      <Field label="当前密码"><input type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+      <Field label="新密码" hint="10–256 个字符"><input type="password" autoComplete="new-password" aria-describedby="new-password-rules" minLength={10} maxLength={256} required value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+      <p id="new-password-rules" className="muted">{PASSWORD_REQUIREMENTS}</p>
       <button className="button button--primary"><LockKeyhole size={17} />更新密码</button>
     </form>
   );
@@ -1975,7 +1990,7 @@ function TimezoneSelect({
 }
 
 function InlineError({ message }: { message: string }) {
-  return <div className="inline-error">{message}</div>;
+  return <div className="inline-error" role="alert">{message}</div>;
 }
 
 function PageLoader({ compact = false }: { compact?: boolean }) {

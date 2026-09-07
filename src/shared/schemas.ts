@@ -228,9 +228,23 @@ export const adjustPointsSchema = z
     }
   });
 
+export const PASSWORD_REQUIREMENTS = "仅支持大小写英文字母、数字和半角符号，可只用其中一类或任意组合；不允许空格、中文、全角符号或不可见字符。请使用英文输入法。";
+export const PASSWORD_CHARACTER_ERROR = "密码含有不支持的字符。请使用英文输入法，只输入大小写英文字母、数字或半角符号，不要包含空格、中文、全角符号或不可见字符。";
+
+export const newPasswordSchema = z.string()
+  .min(10, "密码至少需要 10 个字符。")
+  .max(256, "密码不能超过 256 个字符。")
+  // Reject every character outside visible ASCII, including trailing line breaks.
+  .refine((value) => !/[^\x21-\x7E]/.test(value), PASSWORD_CHARACTER_ERROR);
+
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1).max(256),
+  new_password: newPasswordSchema
+});
+
 export const setupSchema = z.object({
   setup_token: z.string().max(512).optional().default(""),
-  password: z.string().min(10).max(256),
+  password: newPasswordSchema,
   timezone,
   user_label: z.string().trim().min(1).max(40).default("You"),
   ai_label: z.string().trim().min(1).max(40).default("AI")
