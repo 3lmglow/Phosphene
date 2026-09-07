@@ -67,6 +67,8 @@ flowchart LR
 2. 用户与 AI 的显示称呼
 3. 计算自然日、截止时间与连击所用的时区
 
+登录密码须为 **10–256 个字符**，只支持大小写英文字母、数字和半角符号，可以只用其中一类，也可以任意组合。不支持空格、中文、全角符号或不可见字符。请使用英文输入法，例如使用 `!` 而不是 `！`；页面会在继续设置前提示不符合规则的输入。
+
 设置完成后会显示一次 AI Token。把它保存到密码管理器；网站以后不会再次显示原文，丢失时需要在“设置 → AI 连接”中轮换。
 
 如果新域名会在你完成设置前被其他人访问，可以在部署时增加 `PHOSPHENE_SETUP_TOKEN`，用它保护首次认领。
@@ -189,7 +191,7 @@ pnpm check
 - [备份与恢复](docs/BACKUP.md)
 - [故障排查](docs/TROUBLESHOOTING.md)
 - [架构说明](docs/ARCHITECTURE.md)
-- [本次更新说明](docs/RELEASE_NOTES.md)
+- [版本更新说明](docs/RELEASE_NOTES.md)
 - [已知问题](docs/KNOWN_ISSUES.md)
 - [安全说明](SECURITY.md)
 
