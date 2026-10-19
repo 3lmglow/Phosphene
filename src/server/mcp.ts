@@ -161,7 +161,7 @@ function createMcpServer() {
       reward_id: z.string().optional(),
       status: z.enum(["pending", "fulfilled", "cancelled"]).optional(),
       redemption_id: z.string().optional(),
-      note: z.string().optional(),
+      note: z.string().optional().describe("For fulfill_redemption: an optional message shown to the user on the fulfilled redemption."),
       idempotency_key: idempotencyKey()
         .optional()
         .describe(

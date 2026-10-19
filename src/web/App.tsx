@@ -43,7 +43,9 @@ import {
   type ChangeEvent,
   type FormEvent,
   type ReactNode,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -55,6 +57,7 @@ import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
+import { formatDayHeading, formatInstant, localHour, validTimeZone } from "./time";
 
 type Bootstrap = {
   initialized: boolean;
@@ -149,13 +152,14 @@ function defaultTimezone() {
   return supportedTimezoneValues.has(detected) ? detected : "Asia/Shanghai";
 }
 
-function formatDate(value?: string | null, withTime = false) {
-  if (!value) return "没有期限";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "short",
-    day: "numeric",
-    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {})
-  }).format(new Date(value));
+const TimeZoneContext = createContext<string | undefined>(undefined);
+
+function useFormatDate() {
+  const timeZone = useContext(TimeZoneContext);
+  return useCallback(
+    (value?: string | null, withTime = false) => formatInstant(value, withTime, timeZone),
+    [timeZone]
+  );
 }
 
 function pointsFor(task: Task) {
@@ -672,14 +676,16 @@ function useLoad<T>(loader: () => Promise<T>, dependencies: unknown[] = []) {
 function Dashboard({ aiLabel }: { aiLabel: string }) {
   const { data, error, loading, refresh } = useLoad<Overview>(() => api("/overview"), []);
   const tasks = useLoad<{ items: Task[] }>(() => api("/tasks?status=pending&limit=6"), []);
+  const timeZone = useContext(TimeZoneContext);
   if (loading && !data) return <PageLoader />;
   if (error || !data) return <PageError message={error} retry={refresh} />;
-  const hour = new Date().getHours();
+  const now = new Date();
+  const hour = localHour(now, timeZone);
   const greeting = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
   return (
     <div className="page dashboard-page">
       <PageHeader
-        eyebrow={new Intl.DateTimeFormat("zh-CN", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}
+        eyebrow={formatDayHeading(now, timeZone)}
         title={`${greeting}，${data.labels.user}`}
         copy={data.today.active ? "今天的回应已经被记住。余下的事，可以从容一点。" : "今天还没有点亮。挑一件最容易开始的事吧。"}
         action={
@@ -785,6 +791,7 @@ function QueueItem({ icon, label, value, tone }: { icon: ReactNode; label: strin
 
 function TaskCard({ task, aiLabel, onChanged }: { task: Task; aiLabel: string; onChanged?: () => void }) {
   const [open, setOpen] = useState(false);
+  const formatDate = useFormatDate();
   return (
     <>
       <article
@@ -836,6 +843,7 @@ function TaskDialog({
   onChanged?: () => void;
 }) {
   const [task, setTask] = useState(initialTask);
+  const formatDate = useFormatDate();
   const [proofText, setProofText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
@@ -969,6 +977,7 @@ function TaskDialog({
 }
 
 function SubmissionHistory({ submissions }: { submissions: NonNullable<Task["submissions"]> }) {
+  const formatDate = useFormatDate();
   return (
     <section className="submission-history">
       <header>
@@ -1110,6 +1119,7 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
   const [redeeming, setRedeeming] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState("");
+  const formatDate = useFormatDate();
   const visibleAiLabel = overview.data?.labels.ai || aiLabel;
   const sync = useCallback(async (showFeedback = false) => {
     if (showFeedback) setSyncing(true);
@@ -1203,7 +1213,11 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
           {redemptions.data?.length ? redemptions.data.map((item) => (
             <div className="redemption-row" key={item.id}>
               <span className={`redemption-status redemption-status--${item.status}`}>{item.status === "pending" ? <Clock3 /> : <Check />}</span>
-              <div><strong>{presentRewardSnapshot(item.itemNameSnapshot, visibleAiLabel)}</strong><span>{formatDate(item.redeemedAt, true)}</span></div>
+              <div>
+                <strong>{presentRewardSnapshot(item.itemNameSnapshot, visibleAiLabel)}</strong>
+                <span>{formatDate(item.redeemedAt, true)}{item.status === "fulfilled" && item.fulfilledAt ? ` 兑换 · ${formatDate(item.fulfilledAt, true)} 履行` : ""}</span>
+                {item.fulfillmentNote?.trim() && <p className="redemption-note">{visibleAiLabel} 留言：{item.fulfillmentNote}</p>}
+              </div>
               <span>-{item.costSnapshot}</span>
               <em>{item.status === "fulfilled" ? "已履行" : item.status === "cancelled" ? "已取消" : "等待履行"}</em>
             </div>
@@ -1413,10 +1427,12 @@ function HistoryPage({ aiLabel, userLabel }: { aiLabel: string; userLabel: strin
 }
 
 function TimelineEvent({ event, aiLabel, userLabel }: { event: any; aiLabel: string; userLabel: string }) {
+  const formatDate = useFormatDate();
   let icon: ReactNode = <Sparkles />;
   let kindLabel = "记录";
   let title = "记录";
   let copy = "";
+  let note = "";
   let amount: number | null = null;
   if (event.eventKind === "tasks") {
     icon = event.status === "completed" ? <Check /> : <ListTodo />;
@@ -1448,6 +1464,7 @@ function TimelineEvent({ event, aiLabel, userLabel }: { event: any; aiLabel: str
       : event.status === "cancelled"
         ? "已取消"
         : `等待履行 · 已扣除 ${event.costSnapshot} 积分`;
+    if (event.fulfillmentNote?.trim()) note = `${aiLabel} 留言：${event.fulfillmentNote}`;
     amount = -event.costSnapshot;
   } else {
     icon = <ShieldCheck />;
@@ -1462,6 +1479,7 @@ function TimelineEvent({ event, aiLabel, userLabel }: { event: any; aiLabel: str
         <div className="timeline-event__meta"><span>{formatDate(event.date, true)}</span><em>{kindLabel}</em></div>
         <h3>{title}</h3>
         <p>{copy}</p>
+        {note && <p className="timeline-event__note">{note}</p>}
       </div>
       {amount != null && <strong className={amount >= 0 ? "positive" : "negative"}>{amount >= 0 ? "+" : ""}{amount}</strong>}
     </article>
@@ -1679,6 +1697,7 @@ function SettingsForm({ title, copy, children, onSave }: { title: string; copy: 
 }
 
 function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: () => void }) {
+  const formatDate = useFormatDate();
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1764,6 +1783,7 @@ function WebhookSettingsForm({
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [secret, setSecret] = useState("");
+  const formatDate = useFormatDate();
 
   function toggleEvent(type: string, checked: boolean) {
     setForm((current) => ({
@@ -2116,13 +2136,15 @@ export default function App() {
     ai_label: "AI"
   };
   return (
-    <AppShell
-      bootstrap={readyBootstrap}
-      installPrompt={installPrompt}
-      installed={installed}
-      onInstall={installApp}
-      onIdentityChanged={(settings) => setBootstrap((current) => ({ ...(current ?? readyBootstrap), ...settings }))}
-      onLogout={doLogout}
-    />
+    <TimeZoneContext.Provider value={validTimeZone(readyBootstrap.timezone)}>
+      <AppShell
+        bootstrap={readyBootstrap}
+        installPrompt={installPrompt}
+        installed={installed}
+        onInstall={installApp}
+        onIdentityChanged={(settings) => setBootstrap((current) => ({ ...(current ?? readyBootstrap), ...settings }))}
+        onLogout={doLogout}
+      />
+    </TimeZoneContext.Provider>
   );
 }

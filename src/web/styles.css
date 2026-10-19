@@ -1651,6 +1651,15 @@ svg {
 .redemption-row > div span { color: var(--ink-faint); font-size: 8px; }
 .redemption-row > span:nth-child(3) { color: var(--ink-soft); font: 500 16px var(--serif); }
 .redemption-row em { color: var(--ink-faint); font-size: 9px; font-style: normal; }
+.redemption-note,
+.timeline-event p.timeline-event__note {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 .insight-hero {
   min-height: 280px;
