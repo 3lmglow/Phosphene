@@ -19,10 +19,13 @@ Webhook URL 应指向你控制的接收服务。Phosphene 的 `/mcp`、网站首
 | --- | --- | --- |
 | `task.submitted` | 用户提交 `ai_review` 任务 | 查询任务与证据，若仍待审核则批准或驳回 |
 | `task.completed` | self 任务完成，或 AI 审核通过 | 查询最新任务；对用户自助完成作出回应 |
+| `task.expired` | 任务过了截止时间仍未完成，被系统判定逾期 | 查询任务；自行决定是否回应或调整之后的安排 |
 | `redemption.created` | 用户兑换奖励 | 查询待履行兑换并处理 |
 | `notification.test` | 用户发送测试 | 确认接收与验签链路 |
 
 事件正文只包含 ID、状态、日期、积分和 actor 等结构化事实，不复制任务标题、证据文字或图片。消费者收到事件后再通过 MCP 查询当前内容，避免根据延迟到达的旧状态做决定。
+
+以后的版本可能增加新的事件类型。接收端和轮询方遇到不认识的类型时直接跳过即可。
 
 ## 方式一：Webhook
 
@@ -153,6 +156,12 @@ X-Phosphene-Timestamp + "." + 原始请求体字节
 
 - `completed_by="user"` 通常表示 self 任务，可向用户回应完成结果。
 - AI 自己批准任务后产生的 completed event 可以跳过通知，避免对同一次审核重复回应。
+
+### `task.expired`
+
+调用 `query_tasks(task_id=...)` 取得任务内容。事件中的 `penalty_points` 是系统实际扣除的积分，余额不足时可能小于规则中的扣分，也可能为 0；`deadline_at` 是原截止时间，循环任务还会带上 `occurrence_date`。
+
+逾期已经由系统结算，不需要 AI 再调用 `manage_task` 处理。是否回应、怎样回应，由 AI 根据当时的上下文自己决定。
 
 ### `redemption.created`
 

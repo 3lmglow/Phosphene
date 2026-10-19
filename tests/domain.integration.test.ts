@@ -1043,6 +1043,43 @@ describe.sequential("Phosphene domain integration", () => {
     await expect(createWebhookTestEvent()).rejects.toMatchObject({ code: "webhook_disabled" });
   });
 
+  it("tells the AI when the system expires an overdue task", async () => {
+    const created = await createTask({
+      title: "Left unattended",
+      description: "Expires without a submission",
+      type: "challenge",
+      difficulty: "easy",
+      base_points: 4,
+      verification_mode: "self",
+      proof_requirement: "none",
+      recurrence: "once",
+      daily_deadline_time: "23:59",
+      deadline: new Date(Date.now() + 86_400_000).toISOString(),
+      reveal_mode: "immediate",
+      idempotency_key: "integration-expired-task"
+    });
+    if (created.kind !== "task") throw new Error("Expected one-time task");
+    const balanceBefore = (await getOverview()).statistics.balance;
+    const deadline = new Date(Date.now() - 60_000);
+    await getDb().update(tasks).set({ deadlineAt: deadline }).where(eq(tasks.id, created.task.id));
+
+    expect((await reconcileSystem()).expired).toBe(1);
+    const event = await getDb().query.domainEvents.findFirst({
+      where: eq(domainEvents.dedupeKey, `task.expired:${created.task.id}`)
+    });
+    const payload = event!.payload as Record<string, unknown>;
+    expect(event).toMatchObject({ type: "task.expired", actor: "system", aggregateId: created.task.id });
+    expect(payload).toMatchObject({ task_id: created.task.id, status: "expired", deadline_at: deadline.toISOString() });
+    expect(balanceBefore - (await getOverview()).statistics.balance).toBe(payload.penalty_points);
+    const feed = await queryHistory({ kind: "events", after_sequence: event!.sequence - 1, limit: 1 });
+    expect((feed.events as any[])[0]).toMatchObject({ type: "task.expired" });
+
+    expect((await reconcileSystem()).expired).toBe(0);
+    expect(await getDb().query.domainEvents.findMany({
+      where: eq(domainEvents.dedupeKey, `task.expired:${created.task.id}`)
+    })).toHaveLength(1);
+  });
+
   it("round-trips images and idempotency records through an in-place streamed backup", async () => {
     const sourceImage = await sharp({
       create: {

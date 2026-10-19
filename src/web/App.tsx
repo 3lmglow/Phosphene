@@ -1891,6 +1891,7 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
 const webhookEventOptions = [
   ["task.submitted", "任务已提交", "AI 审核任务收到新证据时通知"],
   ["task.completed", "任务已完成", "自助完成或 AI 审核通过后通知"],
+  ["task.expired", "任务已逾期", "任务过了截止时间仍未完成、被系统判定逾期时通知"],
   ["redemption.created", "奖励已兑换", "用户提交奖励兑换后通知"]
 ] as const;
 

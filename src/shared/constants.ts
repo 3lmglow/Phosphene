@@ -27,12 +27,14 @@ export const ACTORS = ["AI", "user", "system"] as const;
 export const DOMAIN_EVENT_TYPES = [
   "task.submitted",
   "task.completed",
+  "task.expired",
   "redemption.created",
   "notification.test"
 ] as const;
 export const WEBHOOK_EVENT_TYPES = [
   "task.submitted",
   "task.completed",
+  "task.expired",
   "redemption.created"
 ] as const;
 

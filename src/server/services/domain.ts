@@ -594,7 +594,21 @@ export async function reconcileInTransaction(tx: Db, now = new Date()) {
       .update(tasks)
       .set({ status: "expired", expiredAt: now, failureReason: "Deadline passed", updatedAt: now })
       .where(eq(tasks.id, task.id));
-    await applyPenalty(tx, task, "system", "Task expired", now);
+    const penalty = await applyPenalty(tx, task, "system", "Task expired", now);
+    await emitDomainEvent(tx, {
+      type: "task.expired",
+      aggregateType: "task",
+      aggregateId: task.id,
+      actor: "system",
+      dedupeKey: `task.expired:${task.id}`,
+      payload: {
+        task_id: task.id,
+        status: "expired",
+        deadline_at: task.deadlineAt?.toISOString() ?? null,
+        occurrence_date: task.occurrenceDate ?? null,
+        penalty_points: penalty
+      }
+    });
   }
   if (generated || overdue.length || pausedCancelled) {
     await audit(tx, "system", "system.reconciled", "system", null, "Recurring tasks and deadlines reconciled", {

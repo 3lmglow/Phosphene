@@ -576,7 +576,7 @@ export const domainEvents = sqliteTable(
     index("domain_events_aggregate_idx").on(table.aggregateType, table.aggregateId),
     check(
       "domain_events_type_check",
-      sql`${table.type} in ('task.submitted', 'task.completed', 'redemption.created', 'notification.test')`
+      sql`${table.type} in (${sql.raw(DOMAIN_EVENT_TYPES.map((type) => `'${type}'`).join(", "))})`
     ),
     check("domain_events_actor_check", sql`${table.actor} in ('AI', 'user', 'system')`),
     check("domain_events_version_check", sql`${table.version} > 0`)
@@ -592,7 +592,7 @@ export const webhookConfig = sqliteTable(
     eventTypes: text("event_types", { mode: "json" })
       .$type<string[]>()
       .notNull()
-      .default(sql`'["task.submitted","task.completed","redemption.created"]'`),
+      .default(sql`'["task.submitted","task.completed","task.expired","redemption.created"]'`),
     signingSecret: text("signing_secret").notNull(),
     ...timestamps
   },
