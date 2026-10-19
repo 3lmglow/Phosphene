@@ -183,6 +183,24 @@ IP 证书的有效期约 6 天，Caddy 会自动续期，不需要手动处理�
 docker compose --profile https up -d
 ```
 
+### 连接 ChatGPT、Claude 等应用
+
+ChatGPT 不接受 IP 形式的服务器地址，其他应用也可能有同样的限制。没有自己的域名时，可以使用免费的 `sslip.io`：把 IP 中的点换成横线，后面加上 `.sslip.io`。例如服务器 IP 是 `203.0.113.10`，就把 `.env` 改成：
+
+```env
+PHOSPHENE_HOST=203-0-113-10.sslip.io
+```
+
+再运行一次：
+
+```bash
+docker compose --profile https up -d
+```
+
+之后用 `https://203-0-113-10.sslip.io` 访问网站，在应用中填写 `https://203-0-113-10.sslip.io/mcp`。新地址需要重新登录一次；已安装的 PWA 和已经配置的 AI 客户端也要改用新地址。
+
+`sslip.io` 由很多人共用，偶尔会遇到证书申请次数限制。如果几分钟后仍无法打开，运行 `docker compose --profile https logs caddy` 查看原因，过几个小时再重启一次即可。
+
 ### 已在使用 1Panel 或宝塔
 
 不需要 Caddy。启动时不带 `--profile https`：
