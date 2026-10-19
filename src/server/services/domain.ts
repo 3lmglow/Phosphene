@@ -1463,6 +1463,22 @@ export async function listAchievements() {
   });
 }
 
+export const ACTIVITY_CALENDAR_DAYS = 364;
+
+export async function getActivityCalendar(now = new Date()) {
+  await reconcileSystem(now);
+  const db = getDb();
+  const settings = await getSettings(db);
+  const today = localDate(now, settings.timezone);
+  const from = addCalendarDays(today, -(ACTIVITY_CALENDAR_DAYS - 1));
+  const rows = await db
+    .select({ date: dailyActivity.activityDate, completed: dailyActivity.completedCount })
+    .from(dailyActivity)
+    .where(and(gte(dailyActivity.activityDate, from), lte(dailyActivity.activityDate, today)))
+    .orderBy(asc(dailyActivity.activityDate));
+  return { from, to: today, timezone: settings.timezone, days: rows.filter((row) => row.completed > 0) };
+}
+
 export async function getPublicSettings() {
   const settings = await getSettings(getDb());
   return {

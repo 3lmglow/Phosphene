@@ -51,6 +51,7 @@ import {
   getOverview,
   getPublicSettings,
   getUserSettings,
+  getActivityCalendar,
   listAchievements,
   manageRewards,
   queryHistory,
@@ -292,6 +293,13 @@ router.get(
   "/achievements",
   asyncRoute(async (_request, response) => {
     response.json({ ok: true, data: await listAchievements() });
+  })
+);
+
+router.get(
+  "/activity",
+  asyncRoute(async (_request, response) => {
+    response.json({ ok: true, data: await getActivityCalendar() });
   })
 );
 

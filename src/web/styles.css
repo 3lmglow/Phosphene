@@ -1788,6 +1788,90 @@ svg {
 
 .rules-section { margin-bottom: 52px; }
 
+.activity-section {
+  margin: 44px 0 34px;
+}
+
+.activity-card {
+  padding: 24px 26px 20px;
+  border: 1px solid rgba(113, 102, 150, 0.16);
+  border-radius: 19px 19px 19px 7px;
+  background: rgba(253, 252, 255, 0.78);
+  box-shadow: var(--shadow-sm);
+}
+
+.activity-calendar {
+  --activity-cell: 14px;
+}
+
+.activity-calendar__scroll {
+  overflow-x: auto;
+  padding: 3px 3px 4px;
+  scrollbar-width: thin;
+}
+
+.activity-calendar__grid {
+  width: max-content;
+  display: grid;
+  gap: 4px;
+}
+
+.activity-calendar__row {
+  display: contents;
+}
+
+.activity-calendar__month,
+.activity-calendar__weekday,
+.activity-calendar__legend {
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.activity-calendar__month {
+  height: 18px;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.activity-calendar__weekday {
+  padding-right: 8px;
+  line-height: var(--activity-cell);
+}
+
+.activity-cell {
+  width: var(--activity-cell);
+  height: var(--activity-cell);
+  border-radius: 4px 4px 4px 2px;
+  background: rgba(113, 102, 150, 0.09);
+}
+
+.activity-cell--1 { background: #ddd5ef; }
+.activity-cell--2 { background: #bcaee0; }
+.activity-cell--3 { background: #8f7fc4; }
+.activity-cell--4 { background: #5d528a; }
+.activity-cell--empty { background: transparent; }
+.activity-cell--today { box-shadow: 0 0 0 1.5px rgba(242, 179, 107, 0.9); }
+
+.activity-calendar__legend {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.activity-calendar__legend i {
+  display: inline-block;
+}
+
+.activity-calendar__legend span:first-child { margin-right: 4px; }
+.activity-calendar__legend span:last-child { margin-left: 4px; }
+
+@media (max-width: 720px) {
+  .activity-card { padding: 18px 16px 16px; }
+  .activity-calendar { --activity-cell: 13px; }
+}
+
 .rule-card {
   min-height: 180px;
   padding: 20px;

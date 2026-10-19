@@ -57,6 +57,7 @@ import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
+import { ActivityCalendar, type ActivityCalendarData } from "./ActivityCalendar";
 import { ConfirmProvider, Modal, useConfirm } from "./Dialog";
 import { leavePage } from "./navigation";
 import { formatDayHeading, formatInstant, localHour, validTimeZone } from "./time";
@@ -1358,6 +1359,7 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
 function InsightsPage() {
   const overview = useLoad<Overview>(() => api("/overview"), []);
   const achievements = useLoad<Achievement[]>(() => api("/achievements"), []);
+  const activity = useLoad<ActivityCalendarData>(() => api("/activity"), []);
   if (overview.loading || achievements.loading) return <div className="page"><PageLoader /></div>;
   if (!overview.data) return <div className="page"><PageError message={overview.error} retry={overview.refresh} /></div>;
   const stats = overview.data.statistics;
@@ -1378,6 +1380,15 @@ function InsightsPage() {
           </div>
         </div>
       </section>
+      {activity.data && (
+        <section className="section-block activity-section">
+          <SectionHeading
+            title="活跃日历"
+            copy={`最近一年 · ${activity.data.days.length ? `有 ${activity.data.days.length} 天完成了任务` : "完成第一个任务后，这里会亮起第一格"}`}
+          />
+          <div className="activity-card"><ActivityCalendar data={activity.data} /></div>
+        </section>
+      )}
       <section className="stats-grid">
         <StatCard icon={<CheckCircle2 />} label="累计完成" value={stats.totalCompletedTasks} suffix="项" />
         <StatCard icon={<CalendarDays />} label="总坚持天数" value={stats.totalActiveDays} suffix="天" />

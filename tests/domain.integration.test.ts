@@ -33,6 +33,7 @@ import { setupApplication } from "../src/server/services/auth";
 import {
   createTask,
   adjustPoints,
+  getActivityCalendar,
   getOverview,
   listAchievements,
   manageRewards,
@@ -1041,6 +1042,32 @@ describe.sequential("Phosphene domain integration", () => {
       await new Promise<void>((resolve, reject) => receiver.close((error) => error ? reject(error) : resolve()));
     }
     await expect(createWebhookTestEvent()).rejects.toMatchObject({ code: "webhook_disabled" });
+  });
+
+  it("returns the last year of active days in the instance time zone", async () => {
+    const created = await createTask({
+      title: "Light up today",
+      description: "",
+      type: "challenge",
+      difficulty: "easy",
+      base_points: 1,
+      verification_mode: "self",
+      proof_requirement: "none",
+      recurrence: "once",
+      daily_deadline_time: "23:59",
+      deadline: new Date(Date.now() + 86_400_000).toISOString(),
+      reveal_mode: "immediate",
+      idempotency_key: "integration-activity-calendar-task"
+    });
+    if (created.kind !== "task") throw new Error("Expected one-time task");
+    await submitTask(created.task.id, "", []);
+    const calendar = await getActivityCalendar();
+    const settings = await getDb().query.appSettings.findFirst();
+    const today = localDate(new Date(), settings!.timezone);
+    expect(calendar).toMatchObject({ to: today, from: addCalendarDays(today, -363), timezone: settings!.timezone });
+    expect(calendar.days.length).toBeGreaterThan(0);
+    expect(calendar.days.every((day) => day.completed > 0 && day.date >= calendar.from && day.date <= today)).toBe(true);
+    expect(calendar.days.at(-1)!.date).toBe(today);
   });
 
   it("tells the AI when the system expires an overdue task", async () => {
