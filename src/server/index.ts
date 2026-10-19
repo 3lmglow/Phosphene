@@ -177,7 +177,6 @@ const server = app.listen(config.PORT, () => {
   logger.info(
     {
       port: config.PORT,
-      url: config.PUBLIC_URL,
       deploymentMode: config.DEPLOYMENT_MODE,
       mcpAuthMode: config.PHOSPHENE_MCP_AUTH_MODE,
       memoryRssMb: Math.round(memory.rss / 1024 / 1024),

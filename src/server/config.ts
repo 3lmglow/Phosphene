@@ -11,15 +11,10 @@ try {
 const blankToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 const optionalString = z.preprocess(blankToUndefined, z.string().optional());
-const optionalUrl = z.preprocess(
-  blankToUndefined,
-  z.string().url().optional()
-);
 
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
-  PUBLIC_URL: optionalUrl,
   PHOSPHENE_SETUP_TOKEN: optionalString,
   PHOSPHENE_MCP_AUTH_MODE: z.preprocess(
     blankToUndefined,
@@ -38,11 +33,9 @@ const deployment = resolveDeployment({
   sqlitePath: parsed.SQLITE_PATH,
   localStoragePath: parsed.LOCAL_STORAGE_PATH
 });
-const publicUrl = parsed.PUBLIC_URL ?? `http://localhost:${parsed.PORT}`;
 
 export const config = {
   ...parsed,
-  PUBLIC_URL: publicUrl,
   PHOSPHENE_DATA_DIR: deployment.dataDir,
   SQLITE_PATH: deployment.sqlitePath,
   LOCAL_STORAGE_PATH: deployment.localStoragePath,
