@@ -70,6 +70,14 @@ AI 批准时，`completion_date` 使用用户提交时在其时区对应的自�
 
 AI 主动失败与 manual penalty 读取同一套用户边界，并按用户自然日共用每日上限。系统自动逾期使用 `actor=system`，不占用 AI 主动额度。
 
+### 写事务排队
+
+所有写入都经过 `db/client.ts` 中的 `runTransaction()`，在进程内按顺序排队执行。同一时刻只有一个 SQLite 写事务，网页、MCP 与 Webhook worker 同时写入时依次完成，不会因为抢写锁返回 `SQLITE_BUSY`。读查询不进入队列。
+
+在一个事务内部再次调用 `runTransaction()` 会立即报错，而不是等待自己释放锁；需要组合多个步骤时，把已打开的 `tx` 传给下层函数。
+
+Webhook worker 先用普通查询确认已启用且有到期投递，才开启事务；读取任务时，只有存在需要揭晓的惊喜任务才写入。没有请求时，实例不会产生写事务。
+
 ## 幂等
 
 `idempotency_keys` 保存：
