@@ -54,6 +54,10 @@ router.get("/.well-known/oauth-authorization-server", (request, response) => {
   response.json(authorizationServerMetadata(publicOrigin(request)));
 });
 
+router.use("/.well-known", (_request, response) => {
+  response.status(404).json({ error: "not_found" });
+});
+
 router.get(
   "/oauth/authorize",
   limiter(60),

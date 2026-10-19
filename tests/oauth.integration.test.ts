@@ -178,6 +178,7 @@ describe.sequential("OAuth for remote MCP connectors", () => {
       client_id_metadata_document_supported: true,
       authorization_response_iss_parameter_supported: true
     });
+    expect((await call("/.well-known/openid-configuration", {}, false)).status).toBe(404);
   });
 
   it("lets the official SDK client register, get consent, exchange the code and call tools", async () => {
