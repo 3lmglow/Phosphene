@@ -26,7 +26,7 @@
     "check": "pnpm typecheck && pnpm test && pnpm validate:deployment && pnpm build"
   },
   "dependencies": {
-    "@libsql/client": "0.17.4",
+    "@libsql/client": "0.18.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "archiver": "8.0.0",
     "argon2": "0.41.1",

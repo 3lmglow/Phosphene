@@ -31,7 +31,7 @@ import type {
 import type { z } from "zod";
 import type { settingsSchema } from "../../shared/schemas";
 import { config } from "../config";
-import { getDb } from "../db/client";
+import { getDb, runTransaction } from "../db/client";
 import {
   achievementUnlocks,
   achievements,
@@ -612,11 +612,11 @@ export async function reconcileInTransaction(tx: Db, now = new Date()) {
 }
 
 export async function reconcileSystem(now = new Date()) {
-  return getDb().transaction((tx: Db) => reconcileInTransaction(tx, now));
+  return runTransaction((tx: Db) => reconcileInTransaction(tx, now));
 }
 
 export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     await reconcileInTransaction(tx);
     assertState(
       actor !== "AI" || !["image", "text_or_image"].includes(input.proof_requirement),
@@ -699,13 +699,16 @@ export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
 }
 
 export async function revealNextVisitTasks(): Promise<number> {
-  const db = getDb();
+  const unrevealed = and(eq(tasks.revealMode, "next_visit"), isNull(tasks.revealedAt));
+  if (!(await getDb().query.tasks.findFirst({ columns: { id: true }, where: unrevealed }))) return 0;
   const now = new Date();
-  const rows = await db
-    .update(tasks)
-    .set({ revealedAt: now, updatedAt: now })
-    .where(and(eq(tasks.revealMode, "next_visit"), isNull(tasks.revealedAt)))
-    .returning({ id: tasks.id });
+  const rows = await runTransaction((tx) =>
+    tx
+      .update(tasks)
+      .set({ revealedAt: now, updatedAt: now })
+      .where(unrevealed)
+      .returning({ id: tasks.id })
+  );
   return rows.length;
 }
 
@@ -749,7 +752,7 @@ export async function queryTasks(input: TaskQueryInput, actor: Actor = "AI") {
 }
 
 export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     await reconcileInTransaction(tx);
     return idempotent(tx, "manage_task", input.idempotency_key, input, async () => {
       const now = new Date();
@@ -979,7 +982,7 @@ export async function submitTask(
   storedProofs: StoredProof[],
   actor: Actor = "user"
 ) {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     await reconcileInTransaction(tx);
     const task = assertFound(await tx.query.tasks.findFirst({ where: eq(tasks.id, taskId) }), "Task not found");
     assertState(task.status === "pending", "task_not_pending", "Only a pending task can be submitted");
@@ -1280,7 +1283,7 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
     return rows.map((row: any) => presentRedemption(row, settings.aiLabel));
   }
 
-  return db.transaction(async (tx: Db) =>
+  return runTransaction(async (tx: Db) =>
     idempotent(tx, "manage_rewards", input.idempotency_key, input, async () => {
       if (input.action === "create") {
         const id = createId("reward");
@@ -1343,7 +1346,7 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
 }
 
 export async function redeemReward(rewardId: string, idempotencyKey: string) {
-  return getDb().transaction(async (tx: Db) =>
+  return runTransaction(async (tx: Db) =>
     idempotent(tx, "redeem_reward", idempotencyKey, { reward_id: rewardId }, async () => {
       const settings = await getSettings(tx);
       const reward = assertFound(
@@ -1392,7 +1395,7 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
 }
 
 export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI") {
-  return getDb().transaction(async (tx: Db) =>
+  return runTransaction(async (tx: Db) =>
     idempotent(tx, "adjust_points", input.idempotency_key, input, async () => {
       const settings = await getSettings(tx);
       const now = new Date();
@@ -1475,7 +1478,7 @@ export async function getUserSettings() {
 }
 
 export async function updateUserSettings(input: z.infer<typeof settingsSchema>) {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     const previous = await getSettings(tx);
     const boundaryChanged =
       JSON.stringify(previous.allowedContent) !== JSON.stringify(input.allowed_content) ||

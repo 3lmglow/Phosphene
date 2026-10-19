@@ -14,7 +14,7 @@ import {
   webhookConfig,
   webhookDeliveries
 } from "../db/schema";
-import { getDb } from "../db/client";
+import { getDb, runTransaction } from "../db/client";
 import { AppError, assertFound, assertState } from "../errors";
 import { createId, createSecret } from "../lib/ids";
 import type { WebhookSettingsInput } from "../../shared/schemas";
@@ -133,7 +133,7 @@ export async function getWebhookSettings() {
 }
 
 export async function updateWebhookSettings(input: WebhookSettingsInput) {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     const current = await getConfig(tx);
     await tx
       .update(webhookConfig)
@@ -174,7 +174,7 @@ async function getWebhookSettingsFromTransaction(tx: Db) {
 }
 
 export async function rotateWebhookSecret() {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     const secret = `phosphene_webhook_${createSecret(32)}`;
     await tx
       .update(webhookConfig)
@@ -195,7 +195,7 @@ export async function rotateWebhookSecret() {
 }
 
 export async function createWebhookTestEvent() {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     const config = await getConfig(tx);
     assertState(config.enabled, "webhook_disabled", "Enable the Webhook before sending a test");
     assertState(Boolean(config.url), "webhook_url_required", "Configure a Webhook URL before sending a test");
@@ -229,7 +229,7 @@ export async function listWebhookDeliveries(limit = 20) {
 }
 
 export async function retryWebhookDelivery(deliveryId: string) {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     const delivery = assertFound(
       await tx.query.webhookDeliveries.findFirst({
         where: eq(webhookDeliveries.id, deliveryId)
@@ -284,26 +284,33 @@ export type ClaimedWebhookDelivery = {
   };
 };
 
+async function findClaimableDelivery(db: Db, now: Date) {
+  const config = await getConfig(db);
+  if (!config.enabled || !config.url) return null;
+  const candidate = await db.query.webhookDeliveries.findFirst({
+    where: or(
+      and(
+        eq(webhookDeliveries.status, "pending"),
+        lte(webhookDeliveries.nextAttemptAt, now)
+      ),
+      and(
+        eq(webhookDeliveries.status, "processing"),
+        lte(webhookDeliveries.leaseExpiresAt, now)
+      )
+    ),
+    orderBy: [asc(webhookDeliveries.createdAt)]
+  });
+  return candidate ? { config, candidate } : null;
+}
+
 export async function claimWebhookDelivery(
   now = new Date()
 ): Promise<ClaimedWebhookDelivery | null> {
-  return getDb().transaction(async (tx: Db) => {
-    const config = await getConfig(tx);
-    if (!config.enabled || !config.url) return null;
-    const candidate = await tx.query.webhookDeliveries.findFirst({
-      where: or(
-        and(
-          eq(webhookDeliveries.status, "pending"),
-          lte(webhookDeliveries.nextAttemptAt, now)
-        ),
-        and(
-          eq(webhookDeliveries.status, "processing"),
-          lte(webhookDeliveries.leaseExpiresAt, now)
-        )
-      ),
-      orderBy: [asc(webhookDeliveries.createdAt)]
-    });
-    if (!candidate) return null;
+  if (!(await findClaimableDelivery(getDb(), now))) return null;
+  return runTransaction(async (tx: Db) => {
+    const claimable = await findClaimableDelivery(tx, now);
+    if (!claimable) return null;
+    const { config, candidate } = claimable;
     const event = assertFound(
       await tx.query.domainEvents.findFirst({
         where: eq(domainEvents.id, candidate.eventId)
@@ -350,24 +357,26 @@ export async function markWebhookDelivered(
   statusCode: number,
   now = new Date()
 ) {
-  await getDb()
-    .update(webhookDeliveries)
-    .set({
-      status: "delivered",
-      deliveredAt: now,
-      lastStatusCode: statusCode,
-      lastError: null,
-      leaseToken: null,
-      leaseExpiresAt: null,
-      updatedAt: now
-    })
-    .where(
-      and(
-        eq(webhookDeliveries.id, deliveryId),
-        eq(webhookDeliveries.status, "processing"),
-        eq(webhookDeliveries.leaseToken, leaseToken)
+  await runTransaction((tx: Db) =>
+    tx
+      .update(webhookDeliveries)
+      .set({
+        status: "delivered",
+        deliveredAt: now,
+        lastStatusCode: statusCode,
+        lastError: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        updatedAt: now
+      })
+      .where(
+        and(
+          eq(webhookDeliveries.id, deliveryId),
+          eq(webhookDeliveries.status, "processing"),
+          eq(webhookDeliveries.leaseToken, leaseToken)
+        )
       )
-    );
+  );
 }
 
 export function retryDelayForAttempt(attempt: number): number {
@@ -382,7 +391,7 @@ export async function markWebhookFailed(
   retryAfterMs?: number,
   now = new Date()
 ) {
-  return getDb().transaction(async (tx: Db) => {
+  return runTransaction(async (tx: Db) => {
     const delivery = await tx.query.webhookDeliveries.findFirst({
       where: and(
         eq(webhookDeliveries.id, deliveryId),

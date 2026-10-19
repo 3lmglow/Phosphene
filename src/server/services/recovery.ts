@@ -2,7 +2,7 @@ import argon2 from "argon2";
 import { and, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { RecoveryStatus } from "../../shared/recovery";
 import { recoverySettingsSchema, resetPasswordSchema } from "../../shared/schemas";
-import { getDb } from "../db/client";
+import { getDb, runTransaction } from "../db/client";
 import { auditLogs, sessions, userAccount } from "../db/schema";
 import { AppError, assertFound, assertState } from "../errors";
 import { createId } from "../lib/ids";
@@ -28,7 +28,7 @@ export async function saveRecoverySettings(values: unknown) {
   }
   const recoveryAnswerHash = input.recovery
     ? await argon2.hash(input.recovery.answer, { type: argon2.argon2id }) : null;
-  await db.transaction(async (tx: any) => {
+  await runTransaction(async (tx: any) => {
     const [updated] = await tx.update(userAccount).set({
       recoveryQuestion: input.recovery?.question ?? null,
       recoveryAnswerHash,
@@ -61,10 +61,10 @@ export async function resetPasswordWithRecovery(values: unknown) {
   const unchanged = and(eq(userAccount.id, 1), eq(userAccount.passwordHash, account.passwordHash), eq(userAccount.recoveryAnswerHash, account.recoveryAnswerHash));
   // Reserve an attempt atomically before hashing. This limit survives restarts and
   // applies to the single account even when requests arrive from different IPs.
-  const [reserved] = await db.update(userAccount).set({
+  const [reserved] = await runTransaction((tx) => tx.update(userAccount).set({
     recoveryAttempts: sql`case when ${expired} then 1 else ${userAccount.recoveryAttempts} + 1 end`,
     recoveryWindowStartedAt: sql`case when ${expired} then ${now.valueOf()} else ${userAccount.recoveryWindowStartedAt} end`
-  }).where(and(unchanged, or(expired, lt(userAccount.recoveryAttempts, attemptLimit)))).returning({ id: userAccount.id });
+  }).where(and(unchanged, or(expired, lt(userAccount.recoveryAttempts, attemptLimit)))).returning({ id: userAccount.id }));
   if (!reserved) {
     throw new AppError(429, "recovery_rate_limited", "密保尝试次数过多，请 15 分钟后再试。你仍可以使用原密码登录。");
   }
@@ -72,7 +72,7 @@ export async function resetPasswordWithRecovery(values: unknown) {
     throw new AppError(401, "invalid_recovery_answer", "密保答案不正确，请检查大小写后重试。");
   }
   const passwordHash = await argon2.hash(input.new_password, { type: argon2.argon2id });
-  await db.transaction(async (tx: any) => {
+  await runTransaction(async (tx: any) => {
     const [updated] = await tx.update(userAccount).set({
       passwordHash, passwordChangedAt: new Date(), updatedAt: new Date(),
       recoveryAttempts: 0, recoveryWindowStartedAt: null

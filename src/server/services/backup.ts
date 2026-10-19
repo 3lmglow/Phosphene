@@ -10,7 +10,7 @@ import sharp from "sharp";
 import { openPromise, type Entry, type ZipFile } from "yauzl";
 import { MAX_PROOF_IMAGE_PIXELS } from "../../shared/constants";
 import { settingsSchema } from "../../shared/schemas";
-import { getDb } from "../db/client";
+import { getDb, runTransaction } from "../db/client";
 import { seedDatabase } from "../db/seed";
 import {
   achievementUnlocks,
@@ -386,7 +386,7 @@ async function writeProofEntry(
 }
 
 async function readBackupData(): Promise<BackupData> {
-  return getDb().transaction(async (tx: any) => ({
+  return runTransaction(async (tx: any) => ({
     settings: await tx.select().from(appSettings),
     taskSeries: await tx.select().from(taskSeries),
     tasks: await tx.select().from(tasks),
@@ -610,8 +610,7 @@ function prepareProofTargets(parsed: ParsedBackup): Map<string, ProofArchiveTarg
 }
 
 async function replaceDatabase(data: BackupData): Promise<void> {
-  const db = getDb();
-  await db.transaction(async (tx: any) => {
+  await runTransaction(async (tx: any) => {
     await tx.delete(webhookDeliveries);
     await tx.delete(domainEvents);
     await tx.delete(idempotencyKeys);

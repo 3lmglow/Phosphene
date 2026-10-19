@@ -3,7 +3,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import type { CookieOptions, NextFunction, Request, Response } from "express";
 import { recoveryQuestionSchema, type RecoveryQuestion } from "../../shared/recovery";
 import { config } from "../config";
-import { getDb } from "../db/client";
+import { getDb, runTransaction } from "../db/client";
 import { aiTokens, appSettings, auditLogs, sessions, userAccount } from "../db/schema";
 import { AppError, assertFound, assertState } from "../errors";
 import { createId, createSecret, tokenHash } from "../lib/ids";
@@ -58,7 +58,7 @@ export async function setupApplication(
   const passwordHash = await argon2.hash(values.password, { type: argon2.argon2id });
   const recovery = values.recovery ? recoveryQuestionSchema.parse(values.recovery) : undefined;
   const recoveryAnswerHash = recovery ? await argon2.hash(recovery.answer, { type: argon2.argon2id }) : null;
-  return db.transaction(async (tx: any) => {
+  return runTransaction(async (tx: any) => {
     const [claimed] = await tx
       .update(appSettings)
       .set({
@@ -101,7 +101,7 @@ export async function login(password: string, response: Response) {
   const account = assertFound(await db.query.userAccount.findFirst({ where: eq(userAccount.id, 1) }), "Account not initialized");
   const valid = await argon2.verify(account.passwordHash, password);
   if (!valid) throw new AppError(401, "invalid_credentials", "Password is incorrect");
-  return db.transaction(async (tx: any) => {
+  return runTransaction(async (tx: any) => {
     const current = await tx.query.userAccount.findFirst({ where: eq(userAccount.id, 1) });
     assertState(current?.passwordHash === account.passwordHash, "credentials_changed", "密码已变化，请重新登录。");
     return issueSession(response, tx);
@@ -111,10 +111,12 @@ export async function login(password: string, response: Response) {
 export async function logout(request: Request, response: Response) {
   const raw = request.cookies?.[SESSION_COOKIE];
   if (raw) {
-    await getDb()
-      .update(sessions)
-      .set({ revokedAt: new Date() })
-      .where(eq(sessions.tokenHash, tokenHash(raw)));
+    await runTransaction((tx) =>
+      tx
+        .update(sessions)
+        .set({ revokedAt: new Date() })
+        .where(eq(sessions.tokenHash, tokenHash(raw)))
+    );
   }
   clearSessionCookies(response);
 }
@@ -196,7 +198,9 @@ export async function requireAi(request: Request, _response: Response, next: Nex
       )
     });
     if (!token) throw new AppError(401, "invalid_ai_token", "AI token is invalid or revoked");
-    await getDb().update(aiTokens).set({ lastUsedAt: new Date() }).where(eq(aiTokens.id, token.id));
+    await runTransaction((tx) =>
+      tx.update(aiTokens).set({ lastUsedAt: new Date() }).where(eq(aiTokens.id, token.id))
+    );
     request.phospheneActor = "AI";
     next();
   } catch (error) {
@@ -205,8 +209,7 @@ export async function requireAi(request: Request, _response: Response, next: Nex
 }
 
 export async function rotateAiToken(name = "Primary AI") {
-  const db = getDb();
-  return db.transaction(async (tx: any) => {
+  return runTransaction(async (tx: any) => {
     await tx.update(aiTokens).set({ revokedAt: new Date() }).where(isNull(aiTokens.revokedAt));
     const raw = `phosphene_ai_${createSecret(32)}`;
     const id = createId("aitoken");
@@ -236,7 +239,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
     throw new AppError(401, "invalid_credentials", "Current password is incorrect");
   }
   const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
-  await db.transaction(async (tx: any) => {
+  await runTransaction(async (tx: any) => {
     const [updated] = await tx.update(userAccount)
       .set({ passwordHash, passwordChangedAt: new Date(), updatedAt: new Date(), recoveryAttempts: 0, recoveryWindowStartedAt: null })
       .where(and(eq(userAccount.id, 1), eq(userAccount.passwordHash, account.passwordHash)))
