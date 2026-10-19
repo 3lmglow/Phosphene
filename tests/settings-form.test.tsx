@@ -17,7 +17,7 @@ it("keeps security after backup and focuses AI connection on connection details"
     if (path === "/bootstrap" || path === "/settings") {
       return { initialized: true, timezone: "Asia/Shanghai", user_label: "你", ai_label: "AI" };
     }
-    if (path === "/ai-tokens") return [];
+    if (path === "/ai-tokens" || path === "/oauth/grants") return [];
     return {};
   });
   render(<MemoryRouter initialEntries={["/settings"]}><App /></MemoryRouter>);

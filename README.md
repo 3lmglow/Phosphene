@@ -99,6 +99,8 @@ Authorization: Bearer phosphene_ai_你的完整Token
 
 连接后先调用 `get_overview`。能读到称呼、时区、余额和当前队列，就表示连接成功。随后可以创建一张低积分、无需证据的测试任务，确认它出现在网页中。
 
+Claude、ChatGPT 等应用可以直接添加自定义连接器，地址同样填写 `https://你的地址/mcp`，按页面提示登录并允许即可，不需要 Token。
+
 不同客户端的配置示例、stdio 转接器和工具参数见 [MCP 连接与工具](docs/MCP.md)。
 
 ## 从创建到完成

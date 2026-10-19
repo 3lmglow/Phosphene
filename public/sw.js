@@ -36,6 +36,8 @@ self.addEventListener("activate", (event) => {
 function isPrivateApi(url) {
   return (
     url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/oauth/") ||
+    url.pathname.startsWith("/.well-known/") ||
     url.pathname === "/mcp" ||
     url.pathname === "/healthz"
   );

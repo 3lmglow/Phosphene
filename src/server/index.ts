@@ -11,6 +11,7 @@ import { initializeDatabase, shutdownDatabase } from "./db/client";
 import { seedDatabase } from "./db/seed";
 import { AppError } from "./errors";
 import { handleMcp } from "./mcp";
+import oauthRouter from "./oauth";
 import apiRouter, { apiErrorHandler } from "./routes";
 import { requireAi } from "./services/auth";
 import {
@@ -101,6 +102,7 @@ app.use((request, response, next) => {
     next(error);
   }
 });
+app.use(oauthRouter);
 app.use("/api", apiRouter);
 app.use("/api", (_request, response) => {
   response.status(404).json({

@@ -57,6 +57,7 @@ import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
+import { leavePage } from "./navigation";
 import { formatDayHeading, formatInstant, localHour, validTimeZone } from "./time";
 
 type Bootstrap = {
@@ -509,6 +510,126 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
           <LockKeyhole size={15} /> 会话使用安全 Cookie 保存在这台设备上。
         </p>
       </form>
+    </AuthBackdrop>
+  );
+}
+
+function connectErrorMessage(code: string | null, requestId: string | null, initialized: boolean) {
+  if (!initialized) return "这个 Phosphene 还没有完成首次设置。请先打开网站完成设置，再回到 AI 应用重新连接。";
+  if (code === "invalid_client") return "无法识别发起连接的应用。请回到 AI 应用重新添加连接器。";
+  if (code === "invalid_redirect_uri") return "连接请求中的返回地址与应用登记的不一致，为了安全已经停止。请回到 AI 应用重新连接。";
+  if (code || !requestId) return "这个连接请求无效。请回到 AI 应用重新连接。";
+  return "";
+}
+
+function ConnectPage({
+  initialized,
+  signedIn,
+  onSignedIn
+}: {
+  initialized: boolean;
+  signedIn: boolean;
+  onSignedIn: () => void;
+}) {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const requestId = params.get("request");
+  const [error, setError] = useState(() => connectErrorMessage(params.get("error"), requestId, initialized));
+  const [request, setRequest] = useState<{ client_name: string; redirect_host: string } | null>(null);
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!requestId || error) return;
+    api<{ client_name: string; redirect_host: string }>(`/oauth/requests/${encodeURIComponent(requestId)}`)
+      .then(setRequest)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "这个连接请求无效。"));
+  }, [requestId]);
+  async function signIn(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setLoginError("");
+    try {
+      await api("/login", { method: "POST", body: { password } });
+      onSignedIn();
+    } catch (reason) {
+      setLoginError(reason instanceof Error ? reason.message : "登录没有成功。");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function decide(action: "approve" | "deny") {
+    setBusy(true);
+    try {
+      const result = await api<{ redirect_to: string }>(
+        `/oauth/requests/${encodeURIComponent(requestId!)}/${action}`,
+        { method: "POST" }
+      );
+      leavePage(result.redirect_to);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "授权没有完成。");
+      setBusy(false);
+    }
+  }
+  return (
+    <AuthBackdrop
+      eyebrow="CONNECT AN APP"
+      title="让 AI 应用连上你的 Phosphene。"
+      copy="授权后，应用里的 AI 可以通过 MCP 使用 Phosphene，和填写 AI Token 的效果相同。你随时可以在“设置 → AI 连接”中撤销。"
+    >
+      <div className="auth-form">
+        {error ? (
+          <>
+            <p className="step-label">无法连接</p>
+            <h2>这次连接没有完成</h2>
+            <InlineError message={error} />
+          </>
+        ) : !request ? (
+          <PageLoader compact />
+        ) : (
+          <>
+            <p className="step-label">授权请求</p>
+            <h2>「{request.client_name}」想连接你的 Phosphene</h2>
+            <p className="muted">
+              允许后，它可以查看和创建任务、审核提交、管理奖励和积分，权限与 AI Token 相同。授权完成后会返回
+              <strong> {request.redirect_host}</strong>。
+            </p>
+            {signedIn ? (
+              <div className="button-row">
+                <button type="button" className="button button--ghost" disabled={busy} onClick={() => void decide("deny")}>
+                  拒绝
+                </button>
+                <button type="button" className="button button--primary button--grow" disabled={busy} onClick={() => void decide("approve")}>
+                  {busy ? "正在授权…" : "允许连接"} <Check size={17} />
+                </button>
+              </div>
+            ) : (
+              <form className="connect-login" onSubmit={signIn}>
+                {loginError && <InlineError message={loginError} />}
+                <Field label="登录密码" hint="先确认这是你的 Phosphene">
+                  <input
+                    autoFocus
+                    required
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                </Field>
+                <button className="button button--primary button--wide" disabled={busy}>
+                  {busy ? "正在确认…" : "登录并继续"} <ArrowRight size={17} />
+                </button>
+                <button type="button" className="button button--ghost button--wide" disabled={busy} onClick={() => void decide("deny")}>
+                  拒绝
+                </button>
+              </form>
+            )}
+            <p className="security-note">
+              <ShieldCheck size={15} /> 应用名称由应用自己填写，请以返回地址为准，只允许你认识的应用。
+            </p>
+          </>
+        )}
+      </div>
     </AuthBackdrop>
   );
 }
@@ -1508,7 +1629,8 @@ function auditEntityLabel(entity: string) {
     redemption: "兑换",
     point_ledger: "积分",
     settings: "设置",
-    system: "系统"
+    system: "系统",
+    oauth_grant: "AI 应用"
   }[entity] ?? "记录";
 }
 
@@ -1536,6 +1658,8 @@ function auditActionLabel(action: string, userLabel: string) {
     "points.penalty": "执行额外扣分",
     "points.correction": "校正积分账本",
     "settings.updated": `更新${userLabel}的设置`,
+    "oauth.authorized": "授权 AI 应用连接",
+    "oauth.revoked": "撤销 AI 应用授权",
     "system.reconciled": "完成系统日常结算"
   }[action] ?? "系统操作";
 }
@@ -1698,9 +1822,20 @@ function SettingsForm({ title, copy, children, onSave }: { title: string; copy: 
 
 function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: () => void }) {
   const formatDate = useFormatDate();
+  const grants = useLoad<any[]>(() => api("/oauth/grants"), []);
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  async function revokeGrant(grant: { id: string; client_name: string }) {
+    if (!confirm(`撤销后，「${grant.client_name}」需要重新授权才能连接。继续吗？`)) return;
+    setError("");
+    try {
+      await api(`/oauth/grants/${grant.id}/revoke`, { method: "POST" });
+      await grants.revalidate();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "撤销没有成功。");
+    }
+  }
   async function rotate() {
     if (!confirm("轮换后，所有旧 AI Token 会立即失效。继续吗？")) return;
     setBusy(true);
@@ -1729,6 +1864,26 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
         ))}
       </div>
       <button className="button button--secondary" onClick={rotate} disabled={busy}><RotateCw size={17} />{busy ? "轮换中…" : "轮换 AI Token"}</button>
+      <section className="connector-apps">
+        <h3>Claude、ChatGPT 等应用</h3>
+        <p>在应用中添加自定义连接器，地址填写上面的 MCP 地址，按页面提示登录并允许即可，不需要填写 Token。</p>
+        {Array.isArray(grants.data) && grants.data.length ? (
+          <div className="token-list">
+            {grants.data.map((grant) => (
+              <div key={grant.id}>
+                <span className="online" />
+                <div>
+                  <strong>{grant.client_name}</strong>
+                  <small>{grant.redirect_host} · {grant.last_used_at ? `最近使用 ${formatDate(grant.last_used_at, true)}` : `授权于 ${formatDate(grant.created_at, true)}`}</small>
+                </div>
+                <button type="button" className="button button--small button--ghost" onClick={() => void revokeGrant(grant)}>撤销</button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="connector-apps__empty">还没有授权的应用。</p>
+        )}
+      </section>
     </div>
   );
 }
@@ -2065,6 +2220,7 @@ function EmptyState({ icon, title, copy, compact = false }: { icon: ReactNode; t
 export default function App() {
   const [state, setState] = useState<"loading" | "setup" | "login" | "ready">("loading");
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
+  const location = useLocation();
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(
     () => window.matchMedia?.("(display-mode: standalone)").matches ?? false
@@ -2116,6 +2272,9 @@ export default function App() {
     setInstallPrompt(null);
   }
   if (state === "loading") return <FullPageLoader />;
+  if (location.pathname === "/connect") {
+    return <ConnectPage initialized={state !== "setup"} signedIn={state === "ready"} onSignedIn={() => setState("ready")} />;
+  }
   if (state === "setup") {
     return (
       <SetupPage

@@ -9,6 +9,8 @@ import { AppError, assertFound, assertState } from "../errors";
 import { createId, createSecret, tokenHash } from "../lib/ids";
 import { readMcpToken } from "../lib/mcp-connection";
 import { acceptsSetupToken } from "../lib/setup-access";
+import { protectedResourceMetadataUrl } from "../lib/origin";
+import { OAUTH_ACCESS_TOKEN_PREFIX, OAUTH_SCOPE, verifyAccessToken } from "./oauth";
 
 const SESSION_COOKIE = "phosphene_session";
 const CSRF_COOKIE = "phosphene_csrf";
@@ -166,7 +168,7 @@ export function requireCsrf(request: Request, _response: Response, next: NextFun
   }
 }
 
-export async function requireAi(request: Request, _response: Response, next: NextFunction) {
+export async function requireAi(request: Request, response: Response, next: NextFunction) {
   try {
     if (config.PHOSPHENE_MCP_AUTH_MODE === "none") {
       request.phospheneActor = "AI";
@@ -177,6 +179,7 @@ export async function requireAi(request: Request, _response: Response, next: Nex
       request.get("authorization"),
       request.get("x-phosphene-mcp-token")
     );
+    const challenge = `Bearer resource_metadata="${protectedResourceMetadataUrl(request)}", scope="${OAUTH_SCOPE}"`;
     if (credential.conflicting) {
       throw new AppError(
         401,
@@ -185,11 +188,21 @@ export async function requireAi(request: Request, _response: Response, next: Nex
       );
     }
     if (!credential.token) {
+      response.set("WWW-Authenticate", challenge);
       throw new AppError(
         401,
         "ai_token_required",
         "AI token is required in Authorization or X-Phosphene-MCP-Token"
       );
+    }
+    if (credential.token.startsWith(OAUTH_ACCESS_TOKEN_PREFIX)) {
+      if (!(await verifyAccessToken(credential.token))) {
+        response.set("WWW-Authenticate", `${challenge}, error="invalid_token"`);
+        throw new AppError(401, "invalid_oauth_token", "OAuth access token is invalid, expired or revoked");
+      }
+      request.phospheneActor = "AI";
+      next();
+      return;
     }
     const token = await getDb().query.aiTokens.findFirst({
       where: and(

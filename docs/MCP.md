@@ -25,6 +25,19 @@ X-Phosphene-MCP-Token: phosphene_ai_你的完整Token
 
 连接后先调用 `get_overview`。成功返回称呼、时区、余额和当前队列，就表示 URL、Token 与 Transport 都正确。
 
+## Claude、ChatGPT 等应用
+
+Claude（网页版和手机 App）的自定义连接器、ChatGPT 网页版的自定义 MCP 服务器等应用，不需要填写 Token，通过授权页面连接：
+
+1. 在应用中添加自定义连接器（Custom connector / Add custom MCP server），名称随意，地址填写 `https://你的地址/mcp`。认证方式有选项时选 **OAuth**。
+2. 保存后点连接，应用会打开 Phosphene 的授权页面。
+3. 浏览器还没有登录 Phosphene 时，先输入登录密码。
+4. 确认页面上显示的返回地址是你正在使用的应用（例如 `claude.ai`、`chatgpt.com`），点 **允许连接**，页面会自动回到应用。
+
+授权后，应用拥有和 AI Token 相同的权限。应用会自动续期，连续 90 天不使用需要重新授权。在 **设置 → AI 连接 → Claude、ChatGPT 等应用** 中可以看到已经授权的应用，并随时撤销。
+
+能否添加自定义连接器、能否使用写入类工具，取决于应用本身和你的账号套餐。
+
 ## 通用配置
 
 ```json
@@ -214,7 +227,8 @@ reward-create-song-v1
 - 401 通常来自 Token 缺失、复制不完整或轮换后仍使用旧 Token。
 - 已连接但没有工具时，检查 URL 是否以 `/mcp` 结尾、Transport 是否为 Streamable HTTP。
 - 只支持旧 SSE 的客户端不能直接连接当前 Endpoint。
-- Claude.ai 远程自定义连接器通常要求 OAuth；Phosphene 当前提供静态 Token，不包含 OAuth 授权服务器。
+- 授权页面提示“连接请求无效”或“已经过期”时，回到应用重新点连接。授权请求 10 分钟内有效。
+- 授权连接遵循 MCP 授权规范：OAuth 2.1 授权码流程、PKCE（S256）、动态客户端注册（DCR）与客户端元数据文档（CIMD），授权响应带 `iss`。发现地址为 `/.well-known/oauth-protected-resource/mcp` 与 `/.well-known/oauth-authorization-server`。
 
 更多症状见 [故障排查](TROUBLESHOOTING.md)。
 

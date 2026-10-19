@@ -89,6 +89,15 @@ AI 主动失败与 manual penalty 读取同一套用户边界，并按用户自�
 - 接受 `X-Phosphene-MCP-Token`
 - 数据库只保存 Token 的 SHA-256
 
+Claude、ChatGPT 等应用通过 OAuth 取得访问令牌，权限与 AI Token 相同：
+
+- 未认证的 `/mcp` 请求返回 401，并在 `WWW-Authenticate` 中给出受保护资源元数据地址。
+- 授权服务器与资源服务器同源，issuer 取自请求的协议和 Host（经过一层反向代理）。
+- 客户端可以动态注册，也可以用 HTTPS 的客户端元数据文档作为 client_id；元数据文档只从公网 HTTPS 地址获取，不跟随重定向，限制大小和超时。
+- `/oauth/authorize` 校验客户端、回调地址与 PKCE 后跳转到网站的 `/connect` 确认页；只有已登录的用户能批准，任何人都可以拒绝。待确认的请求保存在进程内存中，10 分钟过期。
+- 授权码 5 分钟有效、只能使用一次；访问令牌 1 小时，刷新令牌 90 天并在每次刷新时轮换。数据库只保存授权码和令牌的 SHA-256。
+- 授权记录不进入网站 ZIP，恢复备份时也不会被覆盖。
+
 只支持 stdio 的客户端使用本地 `stdio-bridge` 转发工具调用与图片结果，数据和权限仍由远程服务处理。
 
 用户提交、上传、兑换与设置保留在网站 REST API 中；AI 的领域动作通过 MCP 完成。写工具都要求幂等键。
@@ -154,7 +163,7 @@ AI 主动失败与 manual penalty 读取同一套用户边界，并按用户自�
 | 入口 | 保护 |
 | --- | --- |
 | 用户网站 | Argon2id 密码、HttpOnly/SameSite 会话、CSRF |
-| MCP | AI Token，数据库保存哈希 |
+| MCP | AI Token 或 OAuth 访问令牌，数据库保存哈希 |
 | Webhook | 独立 HMAC 密钥、timestamp 与 event id |
 | 上传图片 | 类型、大小、像素验证与重新编码 |
 | 恢复 ZIP | 磁盘暂存、路径白名单、大小与内容校验 |

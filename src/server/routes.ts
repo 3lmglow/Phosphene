@@ -33,6 +33,14 @@ import {
   setupApplication,
   verifyPassword
 } from "./services/auth";
+import { publicOrigin } from "./lib/origin";
+import {
+  approveAuthorizationRequest,
+  denyAuthorizationRequest,
+  describeAuthorizationRequest,
+  listGrants,
+  revokeGrant
+} from "./services/oauth";
 import { getRecoveryStatus, resetPasswordWithRecovery, saveRecoverySettings } from "./services/recovery";
 import {
   MAX_BACKUP_ARCHIVE_BYTES,
@@ -139,6 +147,15 @@ router.post("/recovery/reset", recoveryLimiter, asyncRoute(async (request, respo
   clearSessionCookies(response);
   response.json({ ok: true, data: { login_required: true } });
 }));
+
+router.get("/oauth/requests/:requestId", (request, response) => {
+  response.set("Cache-Control", "no-store");
+  response.json({ ok: true, data: describeAuthorizationRequest(routeParam(request, "requestId")) });
+});
+
+router.post("/oauth/requests/:requestId/deny", (request, response) => {
+  response.json({ ok: true, data: denyAuthorizationRequest(routeParam(request, "requestId"), publicOrigin(request)) });
+});
 
 router.use(requireUser);
 router.use(
@@ -401,6 +418,30 @@ router.get(
   "/ai-tokens",
   asyncRoute(async (_request, response) => {
     response.json({ ok: true, data: await listAiTokens() });
+  })
+);
+
+router.post(
+  "/oauth/requests/:requestId/approve",
+  asyncRoute(async (request, response) => {
+    response.json({
+      ok: true,
+      data: await approveAuthorizationRequest(routeParam(request, "requestId"), publicOrigin(request))
+    });
+  })
+);
+
+router.get(
+  "/oauth/grants",
+  asyncRoute(async (_request, response) => {
+    response.json({ ok: true, data: await listGrants() });
+  })
+);
+
+router.post(
+  "/oauth/grants/:grantId/revoke",
+  asyncRoute(async (request, response) => {
+    response.json({ ok: true, data: await revokeGrant(routeParam(request, "grantId")) });
   })
 );
 

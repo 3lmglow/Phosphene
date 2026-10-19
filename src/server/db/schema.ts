@@ -148,6 +148,56 @@ export const aiTokens = sqliteTable(
   (table) => [uniqueIndex("ai_tokens_hash_idx").on(table.tokenHash)]
 );
 
+export const oauthClients = sqliteTable("oauth_clients", {
+  clientId: text("client_id").primaryKey(),
+  clientName: text("client_name").notNull(),
+  redirectUris: text("redirect_uris", { mode: "json" }).$type<string[]>().notNull().default(jsonArray),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .default(nowInMilliseconds)
+});
+
+export const oauthAuthorizationCodes = sqliteTable(
+  "oauth_authorization_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    clientId: text("client_id").notNull(),
+    clientName: text("client_name").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    codeChallenge: text("code_challenge").notNull(),
+    resource: text("resource"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(nowInMilliseconds)
+  },
+  (table) => [index("oauth_codes_expiry_idx").on(table.expiresAt)]
+);
+
+export const oauthGrants = sqliteTable(
+  "oauth_grants",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    clientName: text("client_name").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    resource: text("resource"),
+    accessTokenHash: text("access_token_hash").notNull(),
+    accessExpiresAt: integer("access_expires_at", { mode: "timestamp_ms" }).notNull(),
+    refreshTokenHash: text("refresh_token_hash").notNull(),
+    refreshExpiresAt: integer("refresh_expires_at", { mode: "timestamp_ms" }).notNull(),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(nowInMilliseconds)
+  },
+  (table) => [
+    uniqueIndex("oauth_grants_access_idx").on(table.accessTokenHash),
+    uniqueIndex("oauth_grants_refresh_idx").on(table.refreshTokenHash)
+  ]
+);
+
 export const taskSeries = sqliteTable(
   "task_series",
   {

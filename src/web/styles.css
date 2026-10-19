@@ -2059,6 +2059,13 @@ svg {
 .token-list small { color: var(--ink-faint); font-size: 8px; }
 .token-list code { color: var(--ink-faint); font-size: 8px; }
 
+.connector-apps { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.connector-apps h3 { margin: 0 0 6px; font-size: 13px; }
+.connector-apps > p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.7; }
+.connector-apps .token-list { margin-bottom: 0; }
+.connector-apps .connector-apps__empty { margin-top: 12px; color: var(--ink-faint); }
+.connect-login { display: grid; gap: 12px; }
+
 .data-action {
   margin-top: 12px;
   padding: 18px;
