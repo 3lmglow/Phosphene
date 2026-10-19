@@ -60,7 +60,7 @@
     "@types/react": "19.1.9",
     "@types/react-dom": "19.1.7",
     "@types/yauzl": "3.4.0",
-    "@vitejs/plugin-react": "4.7.0",
+    "@vitejs/plugin-react": "5.2.0",
     "cross-env": "10.0.0",
     "drizzle-kit": "0.31.11",
     "esbuild": "0.25.8",
@@ -68,7 +68,7 @@
     "tsx": "4.20.3",
     "typescript": "5.9.2",
     "vite": "7.3.7",
-    "vitest": "3.2.7",
+    "vitest": "4.1.11",
     "yaml": "2.9.1"
   }
 }
