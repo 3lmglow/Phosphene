@@ -18,6 +18,20 @@ Phosphene 提供两种备份。它们用途不同，正式使用时建议同时�
 
 因此，把 ZIP 恢复到另一个实例后，仍使用目标实例当前的登录和连接配置。若要连同凭据一起回到原状态，使用 `/data` 卷快照。
 
+不是每个平台都提供卷快照。平台没有快照功能时，以网站 ZIP 为主要备份。
+
+### 在自己的服务器上备份 `/data`
+
+使用 Docker Compose 时，可以先停止 Phosphene，再把整个 `/data` 打包到当前目录：
+
+```bash
+docker compose stop app
+docker compose run --rm -T --no-deps --entrypoint tar app czf - -C /data . > phosphene-data-$(date +%F).tar.gz
+docker compose --profile https start app
+```
+
+停止期间网站和 MCP 不可用，通常只需要几秒。打包文件包含当前实例凭据，请和密码一样妥善保存。
+
 ## 导出网站 ZIP
 
 1. 登录网站，打开“设置 → 数据与备份”。
@@ -104,7 +118,7 @@ ZIP 大小 + 当前 /data/uploads 大小 + 备份中的图片大小
 
 ## 建议周期
 
-- 每次升级前：卷快照 + 网站 ZIP
+- 每次升级前：网站 ZIP，平台支持时再加卷快照
 - 每周：把网站 ZIP 保存到另一台设备或独立存储
 - 每月：在临时实例做一次恢复演练
 - 重要任务、积分或奖励调整前：额外创建恢复点

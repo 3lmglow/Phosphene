@@ -6,7 +6,7 @@ MCP 让现有 AI 客户端调用 Phosphene 的任务、积分与奖励能力。P
 
 在网站“设置 → AI 连接”中取得：
 
-- Endpoint：`https://你的域名/mcp`
+- Endpoint：`https://你的地址/mcp`
 - AI Token：首次设置或轮换后只显示一次
 
 Transport 选择 **Streamable HTTP**，并发送：

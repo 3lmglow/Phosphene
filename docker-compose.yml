@@ -2,19 +2,39 @@ name: phosphene
 
 services:
   app:
+    image: ${PHOSPHENE_IMAGE:-phosphene:local}
     build:
       context: .
     restart: unless-stopped
+    mem_limit: 512m
     ports:
-      - "8080:8080"
+      - "${PHOSPHENE_BIND:-127.0.0.1}:8080:8080"
     environment:
       NODE_ENV: production
       PORT: 8080
-      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       PHOSPHENE_SETUP_TOKEN: ${PHOSPHENE_SETUP_TOKEN:-}
       PHOSPHENE_MCP_AUTH_MODE: ${PHOSPHENE_MCP_AUTH_MODE:-token}
     volumes:
       - phosphene-data:/data
 
+  caddy:
+    image: caddy:2.11
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PHOSPHENE_HOST: ${PHOSPHENE_HOST:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   phosphene-data:
+  caddy-data:
+  caddy-config:

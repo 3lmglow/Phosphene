@@ -1,0 +1,10 @@
+{
+	default_sni {$PHOSPHENE_HOST}
+	cert_issuer acme {
+		profile shortlived
+	}
+}
+
+{$PHOSPHENE_HOST} {
+	reverse_proxy app:8080
+}

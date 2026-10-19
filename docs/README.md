@@ -5,7 +5,7 @@
 ## 第一次接触
 
 1. [项目首页](../README.md)：先了解 Phosphene 是什么，并完成最短部署与连接。
-2. [部署与运维](DEPLOYMENT.md)：选择 Zeabur、Docker Compose 或 Docker，正确挂载 `/data`。
+2. [部署与运维](DEPLOYMENT.md)：fork 并构建自己的镜像，部署到容器平台或自己的服务器，正确挂载 `/data`。
 3. [MCP 连接与工具](MCP.md)：把自己的 AI 客户端连接到 Phosphene。
 4. [产品与规则](PRODUCT_SPEC.md)：理解任务、审核、积分、连击和奖励如何工作。
 
@@ -13,6 +13,7 @@
 
 | 你要做什么 | 阅读 |
 | --- | --- |
+| 从即将停止服务的 Zeabur 搬走 | [从 Zeabur 迁移](MIGRATE_FROM_ZEABUR.md) |
 | 让 AI 在任务完成后及时响应 | [完成通知](WEBHOOKS.md) |
 | 导出、迁移或恢复数据 | [备份与恢复](BACKUP.md) |
 | 解决启动、登录、MCP、图片或通知问题 | [故障排查](TROUBLESHOOTING.md) |

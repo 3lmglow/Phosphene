@@ -10,6 +10,26 @@
 
 日志和问题报告中不要包含密码、AI Token、Webhook 密钥、Cookie、任务正文或证据图片。
 
+## 镜像拉取失败
+
+### 地址前面多了 `docker.io/`
+
+例如日志显示正在拉取 `docker.io/ghcr.io/你的用户名/phosphene:main`。这说明平台把地址当成了 Docker Hub 上的镜像。在 Sealos 中把镜像源改为 **公开**，镜像名称只填 `ghcr.io/...` 或 `ghcr.nju.edu.cn/...` 开头的完整地址。
+
+### `i/o timeout` 或 `DeadlineExceeded`
+
+位于中国大陆的平台和服务器经常无法直接访问 `ghcr.io` 和 Docker Hub。把镜像地址换成南京大学镜像站：
+
+```text
+ghcr.nju.edu.cn/你的用户名/phosphene:main
+```
+
+### `unauthorized`、`denied` 或 `not found`
+
+1. 确认 fork 的 **Actions → Container** 已经成功运行过一次。
+2. 确认地址中的用户名全部是小写。
+3. 确认镜像是公开的，方法见 [确认镜像是公开的](DEPLOYMENT.md#确认镜像是公开的)。
+
 ## 服务无法启动
 
 ### `/healthz` 不可用或容器反复重启
@@ -30,6 +50,27 @@ ready 之前报数据库或上传目录权限错误，说明运行用户不能�
 ### `ENOMEM` / out of memory
 
 查看平台 Metrics，判断是应用内存峰值还是平台直接终止容器。图片提交和大型 ZIP 恢复需要更多内存与磁盘空间；先保留现有卷，再提高实例规格或减小单次操作。
+
+Docker Compose 默认为 Phosphene 设置 512M 内存上限，超过时只会重启 Phosphene 容器。正常使用时内存通常在 200M 以内；如果持续上涨并反复重启，请保留日志并反馈。v1.0.1 及更早版本存在一个随运行时间增长的内存问题，更新到最新版即可解决。
+
+## HTTPS
+
+### 打开 `https://服务器IP` 失败
+
+1. 确认启动时带了 `--profile https`，并且 `.env` 中的 `PHOSPHENE_HOST` 是服务器的公网 IP 或域名。
+2. 在云服务商的防火墙或安全组中放行 TCP 80 和 443。
+3. 查看证书申请日志：`docker compose --profile https logs caddy`。出现 `certificate obtained successfully` 表示证书已经就绪。
+4. 使用域名时，确认 A 记录已经指向这台服务器，且域名没有开启 CDN 代理。
+
+中国大陆未备案的服务器无法对外提供 80 和 443 端口的网站访问，请改用香港、日本、新加坡等地区的服务器，或先完成备案。
+
+### 浏览器提示证书不安全
+
+证书申请完成前，Caddy 无法提供有效证书。等一分钟后刷新；仍然失败时按上一节查看 Caddy 日志。
+
+### 之前能访问 `服务器IP:8080`，更新后不能访问了
+
+新版 Docker Compose 默认只在 `127.0.0.1:8080` 提供 HTTP。改用 `https://服务器IP`（需要 `--profile https`），或通过面板反向代理；确实需要从其他机器访问 8080 时，在 `.env` 中设置 `PHOSPHENE_BIND=0.0.0.0`。
 
 ### `ENOSPC` / no space left on device
 

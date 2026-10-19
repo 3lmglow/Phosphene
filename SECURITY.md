@@ -5,11 +5,11 @@ Phosphene 面向一位用户和一位 AI 的私人实例。
 ## 部署检查
 
 - 为应用挂载私有持久卷，路径为 `/data`。
-- 使用 HTTPS 访问网站与 MCP。
-- 域名公开前完成首次设置，或设置私密的 `PHOSPHENE_SETUP_TOKEN`。
+- 使用 HTTPS 访问网站与 MCP。Docker Compose 默认只在 `127.0.0.1:8080` 提供 HTTP，对外由 Caddy 或面板反向代理提供 HTTPS。
+- 部署后立即完成首次设置；不能马上完成时，设置私密的 `PHOSPHENE_SETUP_TOKEN`。
 - 公网实例保持 `PHOSPHENE_MCP_AUTH_MODE=token`。
 - 不通过静态文件服务暴露 `/data`。
-- 更新前创建卷快照并下载网站 ZIP。
+- 更新前下载网站 ZIP，平台支持时再创建卷快照。
 - 删除服务时确认是否保留持久卷；数据库和图片都在卷中。
 
 ## 凭据

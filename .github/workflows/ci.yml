@@ -28,3 +28,29 @@ jobs:
       - run: pnpm validate:deployment
       - run: pnpm build
       - run: git diff --check
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: |
+          docker compose config --quiet
+          PHOSPHENE_HOST=203.0.113.10 docker compose --profile https config --quiet
+      - name: Build from source and start
+        run: docker compose up -d --build
+      - name: Wait for health
+        run: curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 3 http://127.0.0.1:8080/healthz
+      - name: Keep data across container recreation
+        run: |
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/setup \
+            -H 'content-type: application/json' \
+            -d '{"setup_token":"","password":"compose-check-password","timezone":"Asia/Shanghai","user_label":"CI","ai_label":"AI"}' > /dev/null
+          docker compose down
+          docker compose up -d
+          curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 3 http://127.0.0.1:8080/healthz > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8080/api/bootstrap | grep -q '"initialized":true'
+      - name: Show logs
+        if: failure()
+        run: docker compose logs

@@ -5,7 +5,7 @@ import { MCP_AUTH_MODES } from "./lib/mcp-connection";
 try {
   process.loadEnvFile?.(".env");
 } catch {
-  // .env is optional; production values are injected by Zeabur.
+  // .env is optional; production values are injected by the hosting platform.
 }
 
 const blankToUndefined = (value: unknown) =>
@@ -20,7 +20,6 @@ const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   PUBLIC_URL: optionalUrl,
-  ZEABUR_WEB_URL: optionalUrl,
   PHOSPHENE_SETUP_TOKEN: optionalString,
   PHOSPHENE_MCP_AUTH_MODE: z.preprocess(
     blankToUndefined,
@@ -39,7 +38,7 @@ const deployment = resolveDeployment({
   sqlitePath: parsed.SQLITE_PATH,
   localStoragePath: parsed.LOCAL_STORAGE_PATH
 });
-const publicUrl = parsed.PUBLIC_URL ?? parsed.ZEABUR_WEB_URL ?? `http://localhost:${parsed.PORT}`;
+const publicUrl = parsed.PUBLIC_URL ?? `http://localhost:${parsed.PORT}`;
 
 export const config = {
   ...parsed,

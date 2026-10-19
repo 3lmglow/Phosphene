@@ -1,5 +1,7 @@
 # Phosphene
 
+> **正在使用 Zeabur？** 云平台 Zeabur 已宣布停止运营，共享集群 **12 月 1 日起暂停**，所有服务 12 月 31 日关闭（[Zeabur 官方公告](https://zeabur.com/zh-CN/blogs/zeabur-is-shutting-down)）。Phosphene 本身不受影响，换一个地方部署即可继续使用：请在 12 月 1 日前按照 [从 Zeabur 迁移](docs/MIGRATE_FROM_ZEABUR.md) 导出数据，任务、积分和图片都可以完整带走。
+
 Phosphene 是一个由你自己部署的私人任务、积分与奖励空间，供一位用户和一位 AI 一起使用。
 
 AI 通过 [MCP](https://modelcontextprotocol.io/) 创建任务、审核提交、管理奖励；用户通过网页完成任务、提交文字或图片、积累积分并兑换奖励。Phosphene 不包含 AI 模型，也不替代聊天应用，它负责把聊天中约定的事情保存下来，并让双方围绕同一份任务状态继续互动。
@@ -34,30 +36,34 @@ flowchart LR
   DATA --> FILES["私有图片"]
 ```
 
-网页、API 和 MCP 共用一个应用服务与一个域名。数据库和图片放在同一个 `/data` 持久卷中，不需要另建 PostgreSQL、对象存储或消息队列。
+网页、API 和 MCP 共用一个应用服务与一个地址。数据库和图片放在同一个 `/data` 持久存储中，不需要另建 PostgreSQL、对象存储或消息队列。
 
 ## 快速开始
 
 ### 1. 部署
 
-在 Zeabur 上推荐从自己的 GitHub fork 部署：
-
-- **推荐：fork + GitHub**：连接 Zeabur 后由提交触发部署，方便同步更新和保存自己的改动。
-- **Template**：直接使用发布版，快速创建服务与持久卷。
-
-无论选择哪一种，都要给 Phosphene 服务挂载一个持久卷，路径填写：
+先 fork 本仓库，并在你的 fork 中运行一次 **Actions → Container**，得到属于你自己的镜像：
 
 ```text
-/data
+ghcr.io/你的用户名/phosphene:main
 ```
 
-部署完成后访问 `https://你的域名/healthz`，应返回：
+然后任选一种方式运行它：
+
+| 方式 | 适合 |
+| --- | --- |
+| 容器平台（以 Sealos 为例） | 不想管理服务器，在网页上填几项就能用，约 16–20 元/月 |
+| 自己的服务器 + Docker Compose | 已有服务器；没有域名也能直接用 `https://服务器IP` 访问 |
+
+无论选择哪一种，都要给 Phosphene 挂载一个持久存储，路径为 `/data`。中国大陆的平台或服务器可以通过南京大学镜像站 `ghcr.nju.edu.cn/你的用户名/phosphene:main` 拉取镜像。
+
+部署完成后访问 `https://你的地址/healthz`，应返回类似：
 
 ```json
 {"status":"ok","version":"1.0.1"}
 ```
 
-完整的 Zeabur、Docker、升级和回滚步骤见 [部署与运维](docs/DEPLOYMENT.md)。
+每一步的详细操作、更新和回滚见 [部署与运维](docs/DEPLOYMENT.md)。
 
 ### 2. 完成首次设置
 
@@ -75,14 +81,14 @@ flowchart LR
 
 设置了密保后，可在登录页点击“忘记密码？”回答问题并设置新密码。重置不会清空任务或积分，也不会改变 AI Token；所有设备需要重新登录。没有预先设置密保的实例，不能通过此方式找回。
 
-如果新域名会在你完成设置前被其他人访问，可以在部署时增加 `PHOSPHENE_SETUP_TOKEN`，用它保护首次认领。
+部署好后请立刻完成首次设置。如果不能马上完成，或者地址可能先被别人看到，可以在部署时增加可选的 `PHOSPHENE_SETUP_TOKEN`，用它保护首次认领。
 
 ### 3. 连接 AI
 
 MCP 地址是：
 
 ```text
-https://你的域名/mcp
+https://你的地址/mcp
 ```
 
 客户端使用 Streamable HTTP，并发送：
@@ -135,22 +141,22 @@ Webhook 与业务结果一起可靠落库，网络失败会自动重试；轮询
 
 ## 数据、备份与升级
 
-`/data` 中包含数据库和私有图片。重新部署应用不会替换这个卷，但删除卷会同时删除任务、积分、设置和图片。
+`/data` 中包含数据库和私有图片。重新部署应用不会替换这份存储，但删除它会同时删除任务、积分、设置和图片。
 
-建议同时保留两种备份：
+建议保留两种备份：
 
 | 备份 | 用途 |
 | --- | --- |
-| 平台的 `/data` 卷快照 | 升级前保护和整实例回滚 |
-| 网站导出的 ZIP | 日常下载、迁移和业务数据恢复 |
+| 网站导出的 ZIP | 日常下载、迁移和业务数据恢复，任何部署方式都能用 |
+| 平台或服务器的 `/data` 快照 | 升级前保护和整实例回滚，平台支持时使用 |
 
 网站 ZIP 不包含或覆盖目标实例的登录密码、密保问题与答案、AI Token 或 Webhook 配置。详细内容与恢复步骤见 [备份与恢复](docs/BACKUP.md)。
 
-升级前先创建卷快照并下载 ZIP，再部署新版本。应用启动时会自动运行数据库 migration。
+升级前先下载 ZIP（平台支持时再创建快照），再部署新版本。应用启动时会自动运行数据库 migration。
 
 ## Docker Compose
 
-要求 Docker 与 Docker Compose：
+在自己的电脑上试用时，安装 Docker 后运行：
 
 ```bash
 git clone https://github.com/3lmglow/Phosphene.git
@@ -159,6 +165,8 @@ docker compose up -d --build
 ```
 
 打开 `http://localhost:8080`。Compose 会创建 `phosphene-data` 命名卷并挂载到 `/data`。
+
+部署到服务器时，使用 `docker.env.example` 配置你的镜像和公网 IP，并通过 `docker compose --profile https up -d` 自动启用 HTTPS，步骤见 [部署与运维](docs/DEPLOYMENT.md#方式二自己的服务器--docker-compose)。
 
 `docker compose down` 会保留数据；`docker compose down -v` 会删除命名卷和其中的全部 Phosphene 数据。
 
@@ -189,6 +197,7 @@ pnpm check
 从 [文档导航](docs/README.md) 开始，或直接查看：
 
 - [部署与运维](docs/DEPLOYMENT.md)
+- [从 Zeabur 迁移](docs/MIGRATE_FROM_ZEABUR.md)
 - [MCP 连接与工具](docs/MCP.md)
 - [完成通知](docs/WEBHOOKS.md)
 - [产品与规则](docs/PRODUCT_SPEC.md)
