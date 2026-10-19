@@ -57,6 +57,7 @@ import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
+import { ConfirmProvider, Modal, useConfirm } from "./Dialog";
 import { leavePage } from "./navigation";
 import { formatDayHeading, formatInstant, localHour, validTimeZone } from "./time";
 
@@ -842,14 +843,16 @@ function Dashboard({ aiLabel }: { aiLabel: string }) {
           </div>
           <NavLink to="/rewards">去看看能换什么 <ChevronRight size={16} /></NavLink>
         </article>
-        <article className="mini-stat">
-          <CheckCircle2 />
-          <div><strong>{data.statistics.totalCompletedTasks}</strong><span>完成任务</span></div>
-        </article>
-        <article className="mini-stat">
-          <CalendarDays />
-          <div><strong>{data.statistics.totalActiveDays}</strong><span>总坚持天数</span></div>
-        </article>
+        <div className="mini-stats">
+          <article className="mini-stat">
+            <span className="mini-stat__icon mini-stat__icon--coral"><CheckCircle2 /></span>
+            <div><strong>{data.statistics.totalCompletedTasks}</strong><span>完成任务</span></div>
+          </article>
+          <article className="mini-stat">
+            <span className="mini-stat__icon"><CalendarDays /></span>
+            <div><strong>{data.statistics.totalActiveDays}</strong><span>总坚持天数</span></div>
+          </article>
+        </div>
       </section>
 
       <section className="content-grid">
@@ -1001,99 +1004,97 @@ function TaskDialog({
   const rejectedSubmission = task.status === "pending" && latest?.status === "rejected" ? latest : null;
   const approvedSubmission = task.status === "completed" && latest?.status === "approved" ? latest : null;
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="dialog task-dialog" role="dialog" aria-modal="true" aria-label={task.title}>
-        <header>
-          <div className={`task-symbol task-symbol--${task.type}`}>
-            {task.type === "daily" ? <CalendarDays /> : task.type === "challenge" ? <Flame /> : <Gift />}
-          </div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭"><X /></button>
-        </header>
-        <div className="task-dialog__meta">
-          <span>{typeLabel[task.type]}</span>
-          <span className={`difficulty difficulty--${task.difficulty}`}>{difficultyLabel[task.difficulty]}</span>
-          <span className={`status status--${task.status}`}>{statusLabel[task.status]}</span>
+    <Modal label={task.title} className="task-dialog" onClose={onClose}>
+      <header>
+        <div className={`task-symbol task-symbol--${task.type}`}>
+          {task.type === "daily" ? <CalendarDays /> : task.type === "challenge" ? <Flame /> : <Gift />}
         </div>
-        <h2>{task.title}</h2>
-        <p className="task-description">{task.description || "没有额外说明。"}</p>
-        <div className="detail-strip">
-          <div><Coins /><span>完成奖励</span><strong>+{pointsFor(task)}</strong></div>
-          <div><Clock3 /><span>截止时间</span><strong>{formatDate(task.deadlineAt, true)}</strong></div>
-          <div><ShieldCheck /><span>确认方式</span><strong>{task.verificationMode === "self" ? "自己确认" : `${aiLabel} 确认`}</strong></div>
-        </div>
-        {task.status === "pending" && (
-          <>
-            {rejectedSubmission && (
-              <div className="state-message state-message--rejected">
-                <RotateCw />
-                <div>
-                  <strong>{aiLabel} 请你补充后再提交</strong>
-                  <span>
-                    打回理由：{rejectedSubmission.reviewReason?.trim() || `这次没有留下具体说明，请向 ${aiLabel} 确认后再提交。`}
-                  </span>
-                </div>
-              </div>
-            )}
-            <div className="submission-box">
+        <button className="icon-button" onClick={onClose} aria-label="关闭"><X /></button>
+      </header>
+      <div className="task-dialog__meta">
+        <span>{typeLabel[task.type]}</span>
+        <span className={`difficulty difficulty--${task.difficulty}`}>{difficultyLabel[task.difficulty]}</span>
+        <span className={`status status--${task.status}`}>{statusLabel[task.status]}</span>
+      </div>
+      <h2>{task.title}</h2>
+      <p className="task-description">{task.description || "没有额外说明。"}</p>
+      <div className="detail-strip">
+        <div><Coins /><span>完成奖励</span><strong>+{pointsFor(task)}</strong></div>
+        <div><Clock3 /><span>截止时间</span><strong>{formatDate(task.deadlineAt, true)}</strong></div>
+        <div><ShieldCheck /><span>确认方式</span><strong>{task.verificationMode === "self" ? "自己确认" : `${aiLabel} 确认`}</strong></div>
+      </div>
+      {task.status === "pending" && (
+        <>
+          {rejectedSubmission && (
+            <div className="state-message state-message--rejected">
+              <RotateCw />
               <div>
-                <h3>{rejectedSubmission ? "重新提交" : "提交完成"}</h3>
-                <span>证据要求：{proofLabel(task.proofRequirement)}</span>
+                <strong>{aiLabel} 请你补充后再提交</strong>
+                <span>
+                  打回理由：{rejectedSubmission.reviewReason?.trim() || `这次没有留下具体说明，请向 ${aiLabel} 确认后再提交。`}
+                </span>
               </div>
-              {error && <InlineError message={error} />}
-              {task.proofRequirement !== "none" && task.proofRequirement !== "image" && (
-                <textarea value={proofText} onChange={(event) => setProofText(event.target.value)} placeholder="写下完成情况、感受或相关记录…" rows={4} />
-              )}
-              {["image", "text_or_image", "text_and_image"].includes(task.proofRequirement) && (
-                <>
-                  <input
-                    hidden
-                    ref={fileRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    multiple
-                    onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 4))}
-                  />
-                  <button className="upload-zone" onClick={() => fileRef.current?.click()}>
-                    <ImagePlus />
-                    <strong>{files.length ? `已选择 ${files.length} 张图片` : "添加图片证据"}</strong>
-                    <span>JPEG、PNG 或 WebP · 最多 4 张 · 单张 10 MB</span>
-                  </button>
-                  {files.length > 0 && (
-                    <div className="file-chips">
-                      {files.map((file, index) => (
-                        <span key={`${file.name}-${index}`}>{file.name}<button onClick={() => setFiles(files.filter((_, item) => item !== index))}><X /></button></span>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-              <button className="button button--primary button--wide" disabled={busy} onClick={submit}>
-                {busy ? "正在提交…" : task.verificationMode === "self" ? "确认完成" : `提交给 ${aiLabel} 确认`} <Check size={17} />
-              </button>
             </div>
-          </>
-        )}
-        {task.status === "submitted" && (
-          <div className="state-message state-message--waiting">
-            <TimerReset />
-            <div><strong>已经送达，正在等待确认</strong><span>提交时间 {formatDate(latest?.submittedAt, true)}。连击会按提交当天计算。</span></div>
-          </div>
-        )}
-        {task.status === "completed" && (
-          <div className="state-message state-message--success">
-            <CheckCircle2 />
+          )}
+          <div className="submission-box">
             <div>
-              <strong>这件事已经被好好完成</strong>
-              <span>{task.completionDate} · 获得 {pointsFor(task)} 积分</span>
-              {approvedSubmission?.reviewReason?.trim() && (
-                <span className="state-message__review">通过说明：{approvedSubmission.reviewReason}</span>
-              )}
+              <h3>{rejectedSubmission ? "重新提交" : "提交完成"}</h3>
+              <span>证据要求：{proofLabel(task.proofRequirement)}</span>
             </div>
+            {error && <InlineError message={error} />}
+            {task.proofRequirement !== "none" && task.proofRequirement !== "image" && (
+              <textarea value={proofText} onChange={(event) => setProofText(event.target.value)} placeholder="写下完成情况、感受或相关记录…" rows={4} />
+            )}
+            {["image", "text_or_image", "text_and_image"].includes(task.proofRequirement) && (
+              <>
+                <input
+                  hidden
+                  ref={fileRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 4))}
+                />
+                <button className="upload-zone" onClick={() => fileRef.current?.click()}>
+                  <ImagePlus />
+                  <strong>{files.length ? `已选择 ${files.length} 张图片` : "添加图片证据"}</strong>
+                  <span>JPEG、PNG 或 WebP · 最多 4 张 · 单张 10 MB</span>
+                </button>
+                {files.length > 0 && (
+                  <div className="file-chips">
+                    {files.map((file, index) => (
+                      <span key={`${file.name}-${index}`}>{file.name}<button onClick={() => setFiles(files.filter((_, item) => item !== index))}><X /></button></span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+            <button className="button button--primary button--wide" disabled={busy} onClick={submit}>
+              {busy ? "正在提交…" : task.verificationMode === "self" ? "确认完成" : `提交给 ${aiLabel} 确认`} <Check size={17} />
+            </button>
           </div>
-        )}
-        {task.submissions?.length ? <SubmissionHistory submissions={task.submissions} /> : null}
-      </section>
-    </div>
+        </>
+      )}
+      {task.status === "submitted" && (
+        <div className="state-message state-message--waiting">
+          <TimerReset />
+          <div><strong>已经送达，正在等待确认</strong><span>提交时间 {formatDate(latest?.submittedAt, true)}。连击会按提交当天计算。</span></div>
+        </div>
+      )}
+      {task.status === "completed" && (
+        <div className="state-message state-message--success">
+          <CheckCircle2 />
+          <div>
+            <strong>这件事已经被好好完成</strong>
+            <span>{task.completionDate} · 获得 {pointsFor(task)} 积分</span>
+            {approvedSubmission?.reviewReason?.trim() && (
+              <span className="state-message__review">通过说明：{approvedSubmission.reviewReason}</span>
+            )}
+          </div>
+        </div>
+      )}
+      {task.submissions?.length ? <SubmissionHistory submissions={task.submissions} /> : null}
+    </Modal>
   );
 }
 
@@ -1241,6 +1242,7 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState("");
   const formatDate = useFormatDate();
+  const confirmAction = useConfirm();
   const visibleAiLabel = overview.data?.labels.ai || aiLabel;
   const sync = useCallback(async (showFeedback = false) => {
     if (showFeedback) setSyncing(true);
@@ -1264,7 +1266,11 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
     };
   }, [sync]);
   async function redeem(item: any) {
-    if (!confirm(`使用 ${item.cost} 积分兑换“${item.name}”？`)) return;
+    if (!(await confirmAction({
+      title: `兑换「${item.name}」？`,
+      body: `将使用 ${item.cost} 积分。积分会立即扣除，奖励随后由 ${visibleAiLabel} 履行。`,
+      confirmLabel: "兑换"
+    }))) return;
     setRedeeming(item.id);
     try {
       await api(`/rewards/${item.id}/redeem`, {
@@ -1822,12 +1828,18 @@ function SettingsForm({ title, copy, children, onSave }: { title: string; copy: 
 
 function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: () => void }) {
   const formatDate = useFormatDate();
+  const confirmAction = useConfirm();
   const grants = useLoad<any[]>(() => api("/oauth/grants"), []);
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function revokeGrant(grant: { id: string; client_name: string }) {
-    if (!confirm(`撤销后，「${grant.client_name}」需要重新授权才能连接。继续吗？`)) return;
+    if (!(await confirmAction({
+      title: `撤销「${grant.client_name}」的授权？`,
+      body: "撤销后，它需要重新授权才能连接你的 Phosphene。",
+      confirmLabel: "撤销",
+      destructive: true
+    }))) return;
     setError("");
     try {
       await api(`/oauth/grants/${grant.id}/revoke`, { method: "POST" });
@@ -1837,7 +1849,12 @@ function ConnectionSettings({ tokens, onChanged }: { tokens: any[]; onChanged: (
     }
   }
   async function rotate() {
-    if (!confirm("轮换后，所有旧 AI Token 会立即失效。继续吗？")) return;
+    if (!(await confirmAction({
+      title: "轮换 AI Token？",
+      body: "轮换后，所有旧 AI Token 会立即失效，需要把新 Token 更新到 AI 客户端。",
+      confirmLabel: "轮换",
+      destructive: true
+    }))) return;
     setBusy(true);
     setError("");
     try {
@@ -1940,6 +1957,7 @@ function WebhookSettingsForm({
   const [message, setMessage] = useState("");
   const [secret, setSecret] = useState("");
   const formatDate = useFormatDate();
+  const confirmAction = useConfirm();
 
   function toggleEvent(type: string, checked: boolean) {
     setForm((current) => ({
@@ -1969,7 +1987,12 @@ function WebhookSettingsForm({
   }
 
   async function rotateSecret() {
-    if (!confirm("轮换后，接收端必须改用新密钥验证后续通知。继续吗？")) return;
+    if (!(await confirmAction({
+      title: "轮换签名密钥？",
+      body: "轮换后，接收端必须改用新密钥验证后续通知。",
+      confirmLabel: "轮换",
+      destructive: true
+    }))) return;
     setBusy("secret");
     setMessage("");
     try {
@@ -2063,12 +2086,18 @@ function DataSettings({
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const confirmAction = useConfirm();
   async function restore() {
     if (!file || !password) {
       setMessage("请选择备份并输入当前密码。");
       return;
     }
-    if (!confirm("恢复会替换当前任务、积分、兑换、历史和图片，但保留当前密码与 AI Token。请先为 /data 创建快照并确认有足够临时空间。确定继续吗？")) return;
+    if (!(await confirmAction({
+      title: "用这份备份恢复？",
+      body: "恢复会替换当前任务、积分、兑换、历史和图片，但保留当前密码与 AI Token。请先为 /data 创建快照，并确认有足够的临时空间。",
+      confirmLabel: "恢复",
+      destructive: true
+    }))) return;
     setBusy(true);
     setMessage("");
     const form = new FormData();
@@ -2297,14 +2326,16 @@ export default function App() {
   };
   return (
     <TimeZoneContext.Provider value={validTimeZone(readyBootstrap.timezone)}>
-      <AppShell
-        bootstrap={readyBootstrap}
-        installPrompt={installPrompt}
-        installed={installed}
-        onInstall={installApp}
-        onIdentityChanged={(settings) => setBootstrap((current) => ({ ...(current ?? readyBootstrap), ...settings }))}
-        onLogout={doLogout}
-      />
+      <ConfirmProvider>
+        <AppShell
+          bootstrap={readyBootstrap}
+          installPrompt={installPrompt}
+          installed={installed}
+          onInstall={installApp}
+          onIdentityChanged={(settings) => setBootstrap((current) => ({ ...(current ?? readyBootstrap), ...settings }))}
+          onLogout={doLogout}
+        />
+      </ConfirmProvider>
     </TimeZoneContext.Provider>
   );
 }
