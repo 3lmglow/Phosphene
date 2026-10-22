@@ -60,7 +60,7 @@ ghcr.io/你的用户名/phosphene:main
 部署完成后访问 `https://你的地址/healthz`，应返回类似：
 
 ```json
-{"status":"ok","version":"1.1.0"}
+{"status":"ok","version":"1.1.1"}
 ```
 
 每一步的详细操作、更新和回滚见 [部署与运维](docs/DEPLOYMENT.md)。
