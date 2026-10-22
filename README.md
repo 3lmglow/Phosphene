@@ -174,7 +174,7 @@ docker compose up -d --build
 
 ## 本地开发
 
-仓库使用 Node.js 24 与 pnpm 10；最低运行版本为 Node.js 22。
+仓库的开发环境、CI 与 Docker 镜像使用 Node.js 24.22.1 安全版本及 pnpm 10；本机使用 mise 时会自动遵循仓库的 `mise.toml`。如自行使用 Node.js 22，至少升级至 22.23.4，避免使用未包含 2026-10-21 安全修复的运行时。
 
 ```bash
 corepack enable
