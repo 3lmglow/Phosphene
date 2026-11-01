@@ -1347,7 +1347,7 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
         <div className="redemption-list">
           {redemptions.data?.length ? redemptions.data.map((item) => (
             <div className="redemption-row" key={item.id}>
-              <span className={`redemption-status redemption-status--${item.status}`}>{item.status === "pending" ? <Clock3 /> : <Check />}</span>
+              <span className={`redemption-status redemption-status--${item.status}`}>{item.status === "pending" ? <Clock3 /> : item.status === "cancelled" ? <X /> : <Check />}</span>
               <div>
                 <strong>{presentRewardSnapshot(item.itemNameSnapshot, visibleAiLabel)}</strong>
                 <span>{formatDate(item.redeemedAt, true)}{item.status === "fulfilled" && item.fulfilledAt ? ` 兑换 · ${formatDate(item.fulfilledAt, true)} 履行` : ""}</span>
