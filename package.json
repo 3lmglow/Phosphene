@@ -38,7 +38,7 @@
     "express-rate-limit": "8.6.0",
     "helmet": "8.1.0",
     "lucide-react": "0.536.0",
-    "multer": "2.4.0",
+    "multer": "2.5.0",
     "nanoid": "5.1.16",
     "pino": "9.7.0",
     "pino-http": "10.5.0",
@@ -47,7 +47,7 @@
     "react-router-dom": "7.18.2",
     "sharp": "0.35.5",
     "yauzl": "3.4.0",
-    "zod": "3.25.76"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@testing-library/dom": "10.4.1",
