@@ -974,7 +974,13 @@ function TaskDialog({
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const changed = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Refreshing the list right away would unmount this dialog before the result is seen.
+  function close() {
+    if (changed.current) onChanged?.();
+    onClose();
+  }
   useEffect(() => {
     void api<Task>(`/tasks/${taskId}`)
       .then((detail) => {
@@ -995,7 +1001,7 @@ function TaskDialog({
     try {
       await api(`/tasks/${task.id}/submit`, { method: "POST", body: form });
       setTask(await api(`/tasks/${task.id}`));
-      onChanged?.();
+      changed.current = true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "提交失败。");
     } finally {
@@ -1006,12 +1012,12 @@ function TaskDialog({
   const rejectedSubmission = task.status === "pending" && latest?.status === "rejected" ? latest : null;
   const approvedSubmission = task.status === "completed" && latest?.status === "approved" ? latest : null;
   return (
-    <Modal label={task.title} className="task-dialog" onClose={onClose}>
+    <Modal label={task.title} className="task-dialog" onClose={close}>
       <header>
         <div className={`task-symbol task-symbol--${task.type}`}>
           {task.type === "daily" ? <CalendarDays /> : task.type === "challenge" ? <Flame /> : <Gift />}
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭"><X /></button>
+        <button className="icon-button" onClick={close} aria-label="关闭"><X /></button>
       </header>
       <div className="task-dialog__meta">
         <span>{typeLabel[task.type]}</span>
