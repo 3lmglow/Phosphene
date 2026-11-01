@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 export type ActivityCalendarData = {
@@ -8,6 +9,7 @@ export type ActivityCalendarData = {
 
 const DAY_MS = 86_400_000;
 const WEEKDAY_LABELS = ["一", "", "三", "", "五", "", ""];
+const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
 
 function dayNumber(date: string) {
   const [year, month, day] = date.split("-").map(Number);
@@ -58,6 +60,37 @@ export function monthLabels(weeks: Array<Array<{ date: string } | null>>) {
 function dayTitle(date: string, completed: number) {
   const label = `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日`;
   return completed ? `${label} · 完成 ${completed} 项` : `${label} · 没有完成任务`;
+}
+
+export function recentDays({ to, days }: ActivityCalendarData, count = 7) {
+  const counts = new Map(days.map((day) => [day.date, day.completed]));
+  const first = dayNumber(to) - count + 1;
+  return Array.from({ length: count }, (_, index) => {
+    const date = dateFromNumber(first + index);
+    return {
+      date,
+      completed: counts.get(date) ?? 0,
+      weekday: WEEKDAY_NAMES[new Date((first + index) * DAY_MS).getUTCDay()]
+    };
+  });
+}
+
+export function WeekStrip({ data }: { data: ActivityCalendarData }) {
+  const week = recentDays(data);
+  return (
+    <ol className="week-strip" aria-label={`最近 7 天有 ${week.filter((day) => day.completed > 0).length} 天完成了任务`}>
+      {week.map((day) => (
+        <li
+          key={day.date}
+          className={`week-strip__day${day.completed ? " week-strip__day--done" : ""}${day.date === data.to ? " week-strip__day--today" : ""}`}
+          title={dayTitle(day.date, day.completed)}
+        >
+          <span className="week-strip__box">{day.completed > 0 && <Check />}</span>
+          <span>{day.weekday}</span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 export function ActivityCalendar({ data }: { data: ActivityCalendarData }) {

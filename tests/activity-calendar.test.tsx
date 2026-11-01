@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ActivityCalendar, activityLevel, buildActivityWeeks, monthLabels } from "../src/web/ActivityCalendar";
+import { ActivityCalendar, activityLevel, buildActivityWeeks, monthLabels, recentDays, WeekStrip } from "../src/web/ActivityCalendar";
 
 afterEach(cleanup);
 
@@ -44,5 +44,28 @@ describe("activity calendar", () => {
     expect(screen.getByTitle("10月18日 · 完成 3 项").className).toContain("activity-cell--3");
     expect(screen.getByTitle("10月17日 · 没有完成任务").className).toContain("activity-cell--0");
     expect([...container.querySelectorAll(".activity-calendar__month")].map((label) => label.textContent).filter(Boolean)[0]).toBe("11月");
+  });
+
+  it("ends the seven-day strip on the last day of the range", () => {
+    const week = recentDays(data);
+    expect(week.map((day) => day.date)).toEqual([
+      "2026-10-13",
+      "2026-10-14",
+      "2026-10-15",
+      "2026-10-16",
+      "2026-10-17",
+      "2026-10-18",
+      "2026-10-19"
+    ]);
+    expect(week.map((day) => day.weekday).join("")).toBe("二三四五六日一");
+    expect(week.map((day) => day.completed)).toEqual([0, 0, 0, 0, 0, 3, 6]);
+  });
+
+  it("ticks completed days and marks today in the strip", () => {
+    render(<WeekStrip data={data} />);
+    expect(screen.getByRole("list", { name: "最近 7 天有 2 天完成了任务" })).toBeTruthy();
+    expect(screen.getByTitle("10月19日 · 完成 6 项").className).toContain("week-strip__day--today");
+    expect(screen.getByTitle("10月18日 · 完成 3 项").className).toContain("week-strip__day--done");
+    expect(screen.getByTitle("10月17日 · 没有完成任务").className).not.toContain("week-strip__day--done");
   });
 });

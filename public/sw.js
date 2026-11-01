@@ -1,12 +1,12 @@
-const SHELL_CACHE = "phosphene-shell-v3";
-const RUNTIME_CACHE = "phosphene-runtime-v3";
+const SHELL_CACHE = "phosphene-shell-v4";
+const RUNTIME_CACHE = "phosphene-runtime-v4";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
-  "/icons/phosphene-128.png",
-  "/icons/phosphene-192.png",
-  "/icons/phosphene-512.png",
-  "/icons/phosphene-maskable-512.png"
+  "/icons/phosphene-stars-128.png",
+  "/icons/phosphene-stars-192.png",
+  "/icons/phosphene-stars-512.png",
+  "/icons/phosphene-stars-maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {

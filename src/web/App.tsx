@@ -57,7 +57,7 @@ import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api, idempotencyKey } from "./api";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
-import { ActivityCalendar, type ActivityCalendarData } from "./ActivityCalendar";
+import { ActivityCalendar, type ActivityCalendarData, WeekStrip } from "./ActivityCalendar";
 import { ConfirmProvider, Modal, useConfirm } from "./Dialog";
 import { leavePage } from "./navigation";
 import { formatDayHeading, formatInstant, localHour, validTimeZone } from "./time";
@@ -172,32 +172,21 @@ function pointsFor(task: Task) {
 function FullPageLoader() {
   return (
     <div className="splash">
-      <div className="phosphene-mark phosphene-mark--large" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
+      <img className="phosphene-mark phosphene-mark--large" src="/icons/phosphene-stars-192.png" alt="" />
       <p>正在唤醒你的私人光点…</p>
     </div>
   );
 }
 
-function AuthBackdrop({ children, eyebrow, title, copy }: { children: ReactNode; eyebrow: string; title: string; copy: string }) {
+function AuthBackdrop({ children, title, copy }: { children: ReactNode; title: string; copy: string }) {
   return (
     <main className="auth-page">
-      <div className="auth-ambient ambient-one" />
-      <div className="auth-ambient ambient-two" />
       <section className="auth-story">
         <div className="brand-lockup brand-lockup--light">
-          <div className="phosphene-mark">
-            <span />
-            <span />
-            <span />
-          </div>
-          <span>PHOSPHENE</span>
+          <img className="phosphene-mark" src="/icons/phosphene-stars-128.png" alt="" />
+          <span>Phosphene</span>
         </div>
         <div className="auth-story__copy">
-          <p className="eyebrow">{eyebrow}</p>
           <h1>{title}</h1>
           <p>{copy}</p>
         </div>
@@ -297,7 +286,7 @@ function SetupPage({
 
   if (step === 4 && tokenResult) {
     return (
-      <AuthBackdrop eyebrow="准备完成" title="现在，信号已经亮了。" copy={`这是 ${form.ai_label} 连接 Phosphene 的唯一凭证。它只展示这一次。`}>
+      <AuthBackdrop title="现在，信号已经亮了。" copy={`这是 ${form.ai_label} 连接 Phosphene 的唯一凭证。它只展示这一次。`}>
         <div className="auth-form">
           <div className="success-orbit">
             <Check />
@@ -327,7 +316,6 @@ function SetupPage({
 
   return (
     <AuthBackdrop
-      eyebrow="PRIVATE BY DESIGN"
       title="把你们之间的节奏，留在自己的空间里。"
       copy="Phosphene 将任务、承诺、积分和奖励留在你自己的服务器上。没有公开注册，也没有多余的旁观者。"
     >
@@ -418,7 +406,7 @@ function SetupPage({
         ) : (
           <>
             <div className="field-grid">
-              <Field label="user 的称呼">
+              <Field label="你的称呼">
                 <input
                   required
                   value={form.user_label}
@@ -478,12 +466,12 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
     }
   }
   if (recovering) return (
-    <AuthBackdrop eyebrow="FIND YOUR WAY BACK" title="换一把钥匙，回到原来的空间。" copy="密保只用于重置登录密码，不会清空任务、积分或你们留下的记录。">
+    <AuthBackdrop title="换一把钥匙，回到原来的空间。" copy="密保只用于重置登录密码，不会清空任务、积分或你们留下的记录。">
       <PasswordRecovery onBack={() => setRecovering(false)} onRecovered={() => { setRecovering(false); setPassword(""); setError(""); setMessage("密码已重置，请使用新密码登录。"); }} />
     </AuthBackdrop>
   );
   return (
-    <AuthBackdrop eyebrow="WELCOME BACK" title="你回来了，信号还在。" copy="待完成的约定、累积的分数，还有那条仍在延伸的轨迹，都留在原处等你。">
+    <AuthBackdrop title="你回来了，信号还在。" copy="待完成的约定、累积的分数，还有那条仍在延伸的轨迹，都留在原处等你。">
       <form className="auth-form" onSubmit={submit}>
         <p className="step-label">私人入口</p>
         <h2>进入 Phosphene</h2>
@@ -576,7 +564,6 @@ function ConnectPage({
   }
   return (
     <AuthBackdrop
-      eyebrow="CONNECT AN APP"
       title="让 AI 应用连上你的 Phosphene。"
       copy="授权后，应用里的 AI 可以通过 MCP 使用 Phosphene，和填写 AI Token 的效果相同。你随时可以在“设置 → AI 连接”中撤销。"
     >
@@ -668,12 +655,8 @@ function AppShell({
       <aside className={`sidebar ${mobileOpen ? "sidebar--open" : ""}`}>
         <div className="sidebar__top">
           <div className="brand-lockup">
-            <div className="phosphene-mark">
-              <span />
-              <span />
-              <span />
-            </div>
-            <span>PHOSPHENE</span>
+            <img className="phosphene-mark" src="/icons/phosphene-stars-128.png" alt="" />
+            <span>Phosphene</span>
           </div>
           <button className="icon-button sidebar-close" onClick={() => setMobileOpen(false)} aria-label="关闭菜单">
             <X />
@@ -712,8 +695,8 @@ function AppShell({
           <button className="icon-button" onClick={() => setMobileOpen(true)} aria-label="打开菜单">
             <Menu />
           </button>
-          <span>PHOSPHENE</span>
-          <div className="mini-orbit" />
+          <span>Phosphene</span>
+          <img className="mini-orbit" src="/icons/phosphene-stars-128.png" alt="" />
         </header>
         <Routes>
           <Route path="/" element={<Dashboard aiLabel={bootstrap.ai_label} />} />
@@ -754,20 +737,22 @@ function AppShell({
 function PageHeader({
   eyebrow,
   title,
+  tagline,
   copy,
   action
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
+  tagline?: string;
   copy?: string;
   action?: ReactNode;
 }) {
   return (
     <header className="page-header">
       <div>
-        <p className="eyebrow">{eyebrow}</p>
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
-        {copy && <p>{copy}</p>}
+        {(tagline || copy) && <p>{tagline && <strong className="page-header__tagline">{tagline}。</strong>}{copy}</p>}
       </div>
       {action}
     </header>
@@ -800,6 +785,7 @@ function useLoad<T>(loader: () => Promise<T>, dependencies: unknown[] = []) {
 function Dashboard({ aiLabel }: { aiLabel: string }) {
   const { data, error, loading, refresh } = useLoad<Overview>(() => api("/overview"), []);
   const tasks = useLoad<{ items: Task[] }>(() => api("/tasks?status=pending&limit=6"), []);
+  const activity = useLoad<ActivityCalendarData>(() => api("/activity"), []);
   const timeZone = useContext(TimeZoneContext);
   if (loading && !data) return <PageLoader />;
   if (error || !data) return <PageError message={error} retry={refresh} />;
@@ -815,7 +801,7 @@ function Dashboard({ aiLabel }: { aiLabel: string }) {
         action={
           <div className={`today-pulse ${data.today.active ? "today-pulse--lit" : ""}`}>
             <span />
-            {data.today.active ? "今日已点亮" : "等待第一次回应"}
+            {data.today.active ? <>今日<br />已点亮</> : <>等待<br />第一次回应</>}
           </div>
         }
       />
@@ -831,6 +817,7 @@ function Dashboard({ aiLabel }: { aiLabel: string }) {
             <strong>{data.statistics.currentStreak}</strong>
             <span>天</span>
           </div>
+          {activity.data && <WeekStrip data={activity.data} />}
           <footer>
             <span>最长 {data.statistics.longestStreak} 天</span>
             <span>第 8 天起每日 +3</span>
@@ -921,7 +908,7 @@ function TaskCard({ task, aiLabel, onChanged }: { task: Task; aiLabel: string; o
   return (
     <>
       <article
-        className={`task-card task-card--${task.type}`}
+        className={`task-card task-card--${task.type} task-card--${task.status}`}
         role="button"
         tabIndex={0}
         onClick={() => setOpen(true)}
@@ -937,7 +924,7 @@ function TaskCard({ task, aiLabel, onChanged }: { task: Task; aiLabel: string; o
         </div>
         <div className="task-card__body">
           <div className="task-card__meta">
-            <span>{typeLabel[task.type]}</span>
+            <span className={`tape tape--${task.type}`}>{typeLabel[task.type]}</span>
             <span className={`difficulty difficulty--${task.difficulty}`}>{difficultyLabel[task.difficulty]}</span>
             {task.seriesId && <span>每日重复</span>}
           </div>
@@ -948,6 +935,7 @@ function TaskCard({ task, aiLabel, onChanged }: { task: Task; aiLabel: string; o
             <span className="task-points">+{pointsFor(task)}</span>
           </footer>
         </div>
+        {task.status === "completed" && <span className="stamp stamp--small" aria-hidden="true">已完成</span>}
         <ChevronRight className="task-card__chevron" />
       </article>
       {open && <TaskDialog taskId={task.id} initialTask={task} aiLabel={aiLabel} onClose={() => setOpen(false)} onChanged={onChanged} />}
@@ -974,6 +962,7 @@ function TaskDialog({
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [justCompleted, setJustCompleted] = useState(false);
   const changed = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // Refreshing the list right away would unmount this dialog before the result is seen.
@@ -1000,7 +989,9 @@ function TaskDialog({
     files.forEach((file) => form.append("images", file));
     try {
       await api(`/tasks/${task.id}/submit`, { method: "POST", body: form });
-      setTask(await api(`/tasks/${task.id}`));
+      const updated = await api<Task>(`/tasks/${task.id}`);
+      setTask(updated);
+      setJustCompleted(updated.status === "completed");
       changed.current = true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "提交失败。");
@@ -1020,7 +1011,7 @@ function TaskDialog({
         <button className="icon-button" onClick={close} aria-label="关闭"><X /></button>
       </header>
       <div className="task-dialog__meta">
-        <span>{typeLabel[task.type]}</span>
+        <span className={`tape tape--${task.type}`}>{typeLabel[task.type]}</span>
         <span className={`difficulty difficulty--${task.difficulty}`}>{difficultyLabel[task.difficulty]}</span>
         <span className={`status status--${task.status}`}>{statusLabel[task.status]}</span>
       </div>
@@ -1091,7 +1082,7 @@ function TaskDialog({
       )}
       {task.status === "completed" && (
         <div className="state-message state-message--success">
-          <CheckCircle2 />
+          <span className={`stamp${justCompleted ? " stamp--fresh" : ""}`} aria-hidden="true">已完成</span>
           <div>
             <strong>这件事已经被好好完成</strong>
             <span>{task.completionDate} · 获得 {pointsFor(task)} 积分</span>
@@ -1111,10 +1102,7 @@ function SubmissionHistory({ submissions }: { submissions: NonNullable<Task["sub
   return (
     <section className="submission-history">
       <header>
-        <div>
-          <span>RESPONSE</span>
-          <h3>提交记录</h3>
-        </div>
+        <h3>提交记录</h3>
         <em>{submissions.length} 次</em>
       </header>
       <div className="submission-history__list">
@@ -1212,7 +1200,7 @@ function TasksPage({ aiLabel }: { aiLabel: string }) {
   }
   return (
     <div className="page">
-      <PageHeader eyebrow="TASKS" title="所有约定" copy="一次性的认真、每天的照料，和不经意落下的惊喜。" />
+      <PageHeader title="任务" tagline="所有约定" copy="一次性的认真、每天的照料，和不经意落下的惊喜。" />
       <div className="filter-bar">
         <div className="segmented">
           {[
@@ -1296,8 +1284,8 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="REWARDS"
-        title="把积分变成愿望"
+        title="兑换"
+        tagline="把积分变成愿望"
         copy="每一次完成都不是抽象的数字，它们可以在这里换成真正想要的回应。"
         action={
           <div className="rewards-header-actions">
@@ -1354,7 +1342,7 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
                 {item.fulfillmentNote?.trim() && <p className="redemption-note">{visibleAiLabel} 留言：{item.fulfillmentNote}</p>}
               </div>
               <span>-{item.costSnapshot}</span>
-              <em>{item.status === "fulfilled" ? "已履行" : item.status === "cancelled" ? "已取消" : "等待履行"}</em>
+              <em className={item.status === "fulfilled" ? "stamp stamp--small" : `redemption-state redemption-state--${item.status}`}>{item.status === "fulfilled" ? "已履行" : item.status === "cancelled" ? "已取消" : "等待履行"}</em>
             </div>
           )) : <EmptyState compact icon={<Gift />} title="还没有兑换记录" copy="攒下的积分，会在合适的时候变成愿望。" />}
         </div>
@@ -1372,14 +1360,13 @@ function InsightsPage() {
   const stats = overview.data.statistics;
   return (
     <div className="page">
-      <PageHeader eyebrow="YOUR TRACE" title="留下来的轨迹" copy="不是为了追赶任何人，只是让你看见：那些认真回应过的日子，已经组成了什么。" />
+      <PageHeader title="轨迹" tagline="留下来的轨迹" copy="不是为了追赶任何人，只是让你看见：那些认真回应过的日子，已经组成了什么。" />
       <section className="insight-hero">
         <div className="orbit-chart">
           <div><strong>{stats.currentStreak}</strong><span>当前连击</span></div>
           <i /><i /><i />
         </div>
         <div className="insight-copy">
-          <p className="eyebrow">STREAK</p>
           <h2>{stats.currentStreak ? `连续 ${stats.currentStreak} 天，你仍然在回应。` : "下一次完成，就是新轨迹的起点。"}</h2>
           <p>最长连击为 {stats.longestStreak} 天。连击不限制任务类型，每个自然日至少完成一个任务即可延续。</p>
           <div className="streak-legend">
@@ -1546,7 +1533,7 @@ function HistoryPage({ aiLabel, userLabel }: { aiLabel: string; userLabel: strin
   }
   return (
     <div className="page">
-      <PageHeader eyebrow="HISTORY" title="每一次发生，都有迹可循" copy="积分不会被悄悄改写，任务也不会无声消失。这里保留完整的时间线。" />
+      <PageHeader title="历史" tagline="每一次发生，都有迹可循" copy="积分不会被悄悄改写，任务也不会无声消失。这里保留完整的时间线。" />
       <div className="segmented segmented--standalone">
         {[["all", "总览"], ["tasks", "任务"], ["points", "积分"], ["redemptions", "兑换"], ["audit", "审计"]].map(([value, label]) =>
           <button key={value} className={kind === value ? "active" : ""} onClick={() => setKind(value)}>{label}</button>
@@ -1618,7 +1605,7 @@ function TimelineEvent({ event, aiLabel, userLabel }: { event: any; aiLabel: str
     copy = `${auditActorLabel(event.actor, aiLabel, userLabel)} · ${auditEntityLabel(event.entityType)}`;
   }
   return (
-    <article className="timeline-event">
+    <article className={`timeline-event timeline-event--${event.eventKind}`}>
       <div className="timeline-event__icon">{icon}</div>
       <div className="timeline-event__content">
         <div className="timeline-event__meta"><span>{formatDate(event.date, true)}</span><em>{kindLabel}</em></div>
@@ -1716,7 +1703,7 @@ function SettingsPage({
   const tokens = useLoad<any[]>(() => api("/ai-tokens"), []);
   return (
     <div className="page">
-      <PageHeader eyebrow="SETTINGS" title="这片空间的规则，由你决定" copy="称呼可以亲密，边界必须清楚。AI 能看见这些规则，但只有你可以修改。" />
+      <PageHeader title="设置" tagline="这片空间的规则，由你决定" copy="称呼可以亲密，边界必须清楚。AI 能看见这些规则，但只有你可以修改。" />
       <div className="settings-layout">
         <nav className="settings-nav">
           {[

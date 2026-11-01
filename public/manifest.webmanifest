@@ -9,30 +9,30 @@
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "any",
-  "background_color": "#141928",
-  "theme_color": "#141928",
+  "background_color": "#f5f4ef",
+  "theme_color": "#f5f4ef",
   "categories": ["lifestyle", "productivity"],
   "icons": [
     {
-      "src": "/icons/phosphene-128.png",
+      "src": "/icons/phosphene-stars-128.png",
       "sizes": "128x128",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/phosphene-192.png",
+      "src": "/icons/phosphene-stars-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/phosphene-512.png",
+      "src": "/icons/phosphene-stars-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/phosphene-maskable-512.png",
+      "src": "/icons/phosphene-stars-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

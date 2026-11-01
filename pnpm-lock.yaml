@@ -25,6 +25,9 @@ importers:
 
   .:
     dependencies:
+      '@fontsource/caveat':
+        specifier: 5.3.0
+        version: 5.3.0
       '@libsql/client':
         specifier: 0.18.0
         version: 0.18.0
@@ -607,6 +610,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@fontsource/caveat@5.3.0':
+    resolution: {integrity: sha512-eHTfzQxFSW9ABERRLNruHoNJmKed2J7pqTUc5lp4a4POMgXGKpxmWj3d9Hz10kmAg6iuTTLe6UagbA4bnsmfQw==}
 
   '@hono/node-server@2.0.10':
     resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
@@ -2746,6 +2752,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.2':
     optional: true
+
+  '@fontsource/caveat@5.3.0': {}
 
   '@hono/node-server@2.0.10(hono@4.13.13)':
     dependencies:
