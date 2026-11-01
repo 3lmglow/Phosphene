@@ -40,6 +40,7 @@ describe("password form guidance and feedback", () => {
     expect(screen.getByText("留一个找回密码的办法")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "暂时跳过" }));
     expect(screen.getByText("再告诉我，怎么称呼你们")).toBeTruthy();
+    expect(mockedApi.mock.calls.some(([path]) => path === "/setup")).toBe(false);
   });
 
   it("shows change-password feedback before making any request and permits a non-ASCII current password", async () => {

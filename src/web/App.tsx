@@ -410,7 +410,8 @@ function SetupPage({
             <button type="button" className="button button--primary button--wide" onClick={continueRecovery}>保存密保并继续 <ArrowRight size={17} /></button>
             <div className="button-row">
               <button type="button" className="button button--ghost" onClick={() => { setError(""); setStep(1); }}>返回</button>
-              <button type="button" className="button button--ghost" onClick={() => { setRecoveryEnabled(false); setRecovery(emptyRecoveryDraft); setError(""); setStep(3); }}>暂时跳过</button>
+              {/* A distinct key keeps React from reusing this node as step 3's submit button mid-click. */}
+              <button key="skip" type="button" className="button button--ghost" onClick={() => { setRecoveryEnabled(false); setRecovery(emptyRecoveryDraft); setError(""); setStep(3); }}>暂时跳过</button>
             </div>
             <p className="muted">跳过后暂时无法通过密保找回密码，请保存好登录密码。</p>
           </>
@@ -442,7 +443,7 @@ function SetupPage({
               <button type="button" className="button button--ghost" onClick={() => { setError(""); setStep(2); }}>
                 返回
               </button>
-              <button className="button button--primary button--grow" disabled={busy}>
+              <button key="finish" className="button button--primary button--grow" disabled={busy}>
                 {busy ? "正在创建…" : "完成设置"} <Sparkles size={17} />
               </button>
             </div>
