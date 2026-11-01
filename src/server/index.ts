@@ -138,7 +138,9 @@ if (config.NODE_ENV === "development") {
       maxAge: "1y",
       immutable: true,
       setHeaders(response, filePath) {
-        if (["sw.js", "manifest.webmanifest"].includes(path.basename(filePath))) {
+        // Only Vite's hashed build output may be cached forever; files in public/ keep their names across releases.
+        const hashedAsset = path.relative(webRoot, filePath).split(path.sep)[0] === "assets";
+        if (["sw.js", "manifest.webmanifest"].includes(path.basename(filePath)) || !hashedAsset) {
           response.setHeader("Cache-Control", "no-cache");
         }
       }
