@@ -29,8 +29,10 @@ Phosphene 面向一位用户和一位 AI 的私人实例。
 
 备份与恢复流程见 [docs/BACKUP.md](docs/BACKUP.md)。
 
-## 报告漏洞
+## 反馈问题
 
-请不要在公开 issue 中描述漏洞细节。发现安全问题时，通过维护者 [GitHub 主页](https://github.com/3lmglow) 上列出的联系方式私信联系。
+欢迎通过 [issue](https://github.com/3lmglow/Phosphene/issues) 反馈 bug、提建议，或聊聊使用中遇到的问题。
 
-联系时说明受影响版本、复现步骤与影响，并移除真实密码、Token、Cookie、任务文字和证据图片。普通问题继续使用公开 issue。
+如果你发现的问题可能被人利用、带来安全风险，比如不登录就能看到任务和图片、绕过密码、拿到 AI Token，请先不要公开发出来，通过我 [GitHub 主页](https://github.com/3lmglow) 上的联系方式私下告诉我。
+
+联系时请尽量说明使用的版本、怎么复现、可能造成什么影响，并记得先删掉真实的密码、Token、Cookie、任务内容和图片。
