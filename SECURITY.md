@@ -31,6 +31,6 @@ Phosphene 面向一位用户和一位 AI 的私人实例。
 
 ## 报告漏洞
 
-如果仓库的 Security 页面提供 **Report a vulnerability**，请使用 GitHub Private Vulnerability Report。若该入口不可用，可以在公开 issue 中只请求一个私密联络渠道，不附漏洞细节。
+请不要在公开 issue 中描述漏洞细节。发现安全问题时，通过维护者 [GitHub 主页](https://github.com/3lmglow) 上列出的联系方式私信联系。
 
-私密报告中提供受影响版本、复现步骤与影响，并移除真实密码、Token、Cookie、任务文字和证据图片。普通问题继续使用公开 issue。
+联系时说明受影响版本、复现步骤与影响，并移除真实密码、Token、Cookie、任务文字和证据图片。普通问题继续使用公开 issue。
