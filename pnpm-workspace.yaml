@@ -5,20 +5,22 @@ autoInstallPeers: false
 
 overrides:
   '@esbuild-kit/core-utils>esbuild': 0.25.8
-  '@hono/node-server': 2.0.10
+  '@hono/node-server': 2.1.5
+  '@isaacs/nonrecursive-glob-match@^1.0.0': 1.0.3
   body-parser@^2.0.0: 2.4.0
   baseline-browser-mapping@^2.0.0: 2.11.28
   brace-expansion@^5.0.0: 5.0.12
   browserslist@^4.0.0: 4.29.3
   caniuse-lite@^1.0.0: 1.0.30001815
   electron-to-chromium@^1.5.0: 1.5.452
-  fast-uri@^3.0.0: 3.1.8
+  fast-uri@^3.0.0: 3.1.9
   hono: 4.13.13
   ip-address@^10.0.0: 10.7.4
   nanoid@^3.0.0: 3.3.20
   node-releases@^2.0.0: 2.0.58
   postcss@^8.0.0: 8.5.29
-  qs@^6.0.0: 6.16.0
+  qs@^6.0.0: 6.16.2
+  readdir-glob>minimatch: 11.0.3
   source-map-js@^1.0.0: 1.2.2
 
 allowBuilds:
