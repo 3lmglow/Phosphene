@@ -5,7 +5,7 @@ autoInstallPeers: false
 
 overrides:
   '@esbuild-kit/core-utils>esbuild': 0.25.8
-  '@hono/node-server': 2.1.5
+  '@hono/node-server': 2.1.6
   '@isaacs/nonrecursive-glob-match@^1.0.0': 1.0.3
   body-parser@^2.0.0: 2.4.0
   baseline-browser-mapping@^2.0.0: 2.11.28
