@@ -133,11 +133,13 @@ pnpm build
 
 - `daily` 可以使用 `recurrence: once | daily`
 - `challenge` 是一次性任务，并使用带时区偏移的 `deadline`
-- `surprise` 可以在下次访问或指定 `visible_at` 时揭晓
+- `surprise` 可以在下次访问或指定 `visible_at` 时揭晓；`visible_at` 必须早于 `deadline`
 - 新任务的证据要求使用 `none | text | text_and_image`
 - 每日重复任务使用 `start_date`、可选 `end_date` 与 `daily_deadline_time`
 
-创建重复任务会返回 `series_id`；当天位于有效日期范围内时，也会返回当天任务。
+创建重复任务会返回 `series_id` 和第一天任务的日期 `first_occurrence_date`。第一天就是今天时，`first_task` 是当天任务，否则为 `null`。如果今天的 `daily_deadline_time` 已经过了，系列从明天开始，不会生成刚出现就逾期的任务；`end_date` 也是今天时会返回 `deadline_in_past`。
+
+到截止时间仍未向用户揭晓的 surprise 会逾期，但不扣分。
 
 ### `query_tasks`
 
@@ -156,7 +158,9 @@ pnpm build
 | `pause_series` | 暂停每日重复系列 |
 | `resume_series` | 恢复每日重复系列 |
 
-驳回时提供明确的 `reason`。暂停系列会移除当天尚未提交的任务，不撤销已提交、已完成或历史记录。
+驳回时提供明确的 `reason`。暂停系列会移除当天尚未提交的任务，不撤销已提交、已完成或历史记录。恢复系列时如果今天的截止时间已经过了，新任务从明天开始；今天已是系列最后一天时返回 `series_ended`。
+
+修改定时揭晓 surprise 的 `deadline` 时，新截止时间同样必须晚于 `visible_at`，否则返回 `invalid_reveal_window`。
 
 重复任务的编辑、取消与失败可以选择当前 occurrence，或当前及未来任务。
 

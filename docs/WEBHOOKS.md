@@ -159,7 +159,7 @@ X-Phosphene-Timestamp + "." + 原始请求体字节
 
 ### `task.expired`
 
-调用 `query_tasks(task_id=...)` 取得任务内容。事件中的 `penalty_points` 是系统实际扣除的积分，余额不足时可能小于规则中的扣分，也可能为 0；`deadline_at` 是原截止时间，循环任务还会带上 `occurrence_date`。
+调用 `query_tasks(task_id=...)` 取得任务内容。事件中的 `penalty_points` 是系统实际扣除的积分，余额不足时可能小于规则中的扣分，也可能为 0；到截止时间还没向用户揭晓的 surprise 不扣分，此时为 0；`deadline_at` 是原截止时间，循环任务还会带上 `occurrence_date`。
 
 逾期已经由系统结算，不需要 AI 再调用 `manage_task` 处理。是否回应、怎样回应，由 AI 根据当时的上下文自己决定。
 

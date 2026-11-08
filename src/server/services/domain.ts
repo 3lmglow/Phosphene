@@ -71,6 +71,7 @@ import { emitDomainEvent } from "./events";
 type Db = any;
 type Actor = "AI" | "user" | "system";
 const SERIES_PAUSED_TASK_REASON = "Recurring series was paused";
+const UNREVEALED_EXPIRY_REASON = "Deadline passed before the task was revealed";
 
 function parsePaginationCursor(value?: string): DecodedPageCursor | null {
   if (!value) return null;
@@ -178,6 +179,24 @@ function visibleTaskCondition(now: Date) {
     eq(tasks.revealMode, "immediate"),
     and(eq(tasks.revealMode, "at_time"), lte(tasks.visibleAt, now))
   );
+}
+
+// Mirrors visibleTaskCondition at the deadline: did the user have the task in view before it was due?
+function revealedBeforeDeadline(task: {
+  revealMode: string;
+  visibleAt: Date | null;
+  revealedAt: Date | null;
+  deadlineAt: Date | null;
+}): boolean {
+  if (task.revealMode === "immediate" || !task.deadlineAt) return true;
+  if (task.revealedAt && task.revealedAt < task.deadlineAt) return true;
+  return task.revealMode === "at_time" && !!task.visibleAt && task.visibleAt < task.deadlineAt;
+}
+
+// A daily occurrence whose deadline has already passed would expire the moment it exists,
+// so a series that is created or resumed too late for that day begins on the next day.
+function firstOpenOccurrenceDate(date: string, deadlineTime: string, timezone: string, now: Date): string {
+  return localDateTime(date, deadlineTime, timezone) > now ? date : addCalendarDays(date, 1);
 }
 
 async function materializeSeries(tx: Db, through: string): Promise<number> {
@@ -331,7 +350,8 @@ async function applyPenalty(
   task: any,
   actor: Actor,
   reason: string,
-  now = new Date()
+  now = new Date(),
+  waived = false
 ): Promise<number> {
   const requested = Math.ceil(rewardForTask(task) * 0.5);
   const balance = await currentBalance(tx);
@@ -347,7 +367,7 @@ async function applyPenalty(
     const usedToday = await aiPenaltyUsedOnDate(tx, penaltyDate, settings.timezone);
     availableByBoundary = Math.max(0, settings.dailyPenaltyLimit - usedToday);
   }
-  const actual = Math.min(requested, Math.max(0, balance), availableByBoundary);
+  const actual = waived ? 0 : Math.min(requested, Math.max(0, balance), availableByBoundary);
   if (actual > 0) {
     await addLedger(tx, {
       type: "task_penalty",
@@ -590,11 +610,25 @@ export async function reconcileInTransaction(tx: Db, now = new Date()) {
     where: and(eq(tasks.status, "pending"), lte(tasks.deadlineAt, now))
   });
   for (const task of overdue) {
+    // A surprise the user never saw before its deadline still expires, but costs nothing.
+    const revealed = revealedBeforeDeadline(task);
     await tx
       .update(tasks)
-      .set({ status: "expired", expiredAt: now, failureReason: "Deadline passed", updatedAt: now })
+      .set({
+        status: "expired",
+        expiredAt: now,
+        failureReason: revealed ? "Deadline passed" : UNREVEALED_EXPIRY_REASON,
+        updatedAt: now
+      })
       .where(eq(tasks.id, task.id));
-    const penalty = await applyPenalty(tx, task, "system", "Task expired", now);
+    const penalty = await applyPenalty(
+      tx,
+      task,
+      "system",
+      revealed ? "Task expired" : "Task expired before it was revealed",
+      now,
+      !revealed
+    );
     await emitDomainEvent(tx, {
       type: "task.expired",
       aggregateType: "task",
@@ -639,11 +673,18 @@ export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
     );
     return idempotent(tx, "create_task", input.idempotency_key, input, async () => {
       const settings = await getSettings(tx);
-      const today = localDate(new Date(), settings.timezone);
+      const now = new Date();
+      const today = localDate(now, settings.timezone);
       if (input.recurrence === "daily") {
-        const startDate = input.start_date ?? today;
-        assertState(startDate >= today, "invalid_start_date", "A recurring task cannot start in the past");
-        assertState(!input.end_date || input.end_date >= startDate, "invalid_date_range", "End date must be on or after start date");
+        const requestedStart = input.start_date ?? today;
+        assertState(requestedStart >= today, "invalid_start_date", "A recurring task cannot start in the past");
+        assertState(!input.end_date || input.end_date >= requestedStart, "invalid_date_range", "End date must be on or after start date");
+        const startDate = firstOpenOccurrenceDate(requestedStart, input.daily_deadline_time, settings.timezone, now);
+        assertState(
+          !input.end_date || input.end_date >= startDate,
+          "deadline_in_past",
+          "Today's daily deadline has already passed and the series has no later day"
+        );
         const seriesId = createId("series");
         await tx.insert(taskSeries).values({
           id: seriesId,
@@ -666,10 +707,14 @@ export async function createTask(input: CreateTaskInput, actor: Actor = "AI") {
         const occurrence = await tx.query.tasks.findFirst({
           where: and(eq(tasks.seriesId, seriesId), eq(tasks.occurrenceDate, today))
         });
-        return { kind: "series", series_id: seriesId, first_task: occurrence ?? null };
+        return {
+          kind: "series",
+          series_id: seriesId,
+          first_occurrence_date: startDate,
+          first_task: occurrence ?? null
+        };
       }
 
-      const now = new Date();
       assertState(
         !input.deadline || new Date(input.deadline) > now,
         "deadline_in_past",
@@ -779,6 +824,12 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
         const settings = await getSettings(tx);
         const today = localDate(now, settings.timezone);
         const resumeDate = compareDates(today, series.startDate) >= 0 ? today : series.startDate;
+        const resumeOccurrenceDate = firstOpenOccurrenceDate(
+          resumeDate,
+          series.dailyDeadlineTime,
+          settings.timezone,
+          now
+        );
         if (active) {
           assertState(
             !series.endDate || compareDates(resumeDate, series.endDate) <= 0,
@@ -791,7 +842,7 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
           .set({
             active,
             pausedAt: active ? null : now,
-            nextOccurrenceDate: active ? resumeDate : series.nextOccurrenceDate,
+            nextOccurrenceDate: active ? resumeOccurrenceDate : series.nextOccurrenceDate,
             updatedAt: now
           })
           .where(eq(taskSeries.id, series.id));
@@ -820,6 +871,17 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
                 )
               )
               .returning({ id: tasks.id });
+        if (active) {
+          // Resuming on the last day after its deadline leaves nothing to do, unless a paused
+          // occurrence with its own later deadline was just restored.
+          assertState(
+            !series.endDate ||
+              compareDates(resumeOccurrenceDate, series.endDate) <= 0 ||
+              affectedTasks.length > 0,
+            "series_ended",
+            "This recurring task series has already ended"
+          );
+        }
         await audit(
           tx,
           actor,
@@ -840,6 +902,14 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
           !input.deadline || new Date(input.deadline) > now,
           "deadline_in_past",
           "An edited task deadline must be in the future"
+        );
+        assertState(
+          !input.deadline ||
+            task.revealMode !== "at_time" ||
+            !task.visibleAt ||
+            task.visibleAt < new Date(input.deadline),
+          "invalid_reveal_window",
+          "A task must be revealed before its deadline"
         );
         const patch = {
           title: input.title ?? task.title,
