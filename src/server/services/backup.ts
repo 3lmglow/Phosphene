@@ -47,6 +47,9 @@ const MAX_BACKUP_ROWS = 500_000;
 const MAX_BACKUP_ENTRIES = 200_000;
 const MAX_BACKUP_OBJECT_BYTES = 64 * 1024 * 1024;
 const MAX_BACKUP_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024;
+// SQLite rejects a statement with more than 32,766 bound parameters, and Drizzle
+// binds up to one per column for every inserted row.
+const MAX_INSERT_PARAMETERS = 8_000;
 
 export const MAX_BACKUP_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -88,9 +91,28 @@ const backupTables = {
   webhookDeliveries
 } as const;
 
+type BackupTableName = keyof typeof backupTables;
+
 type BackupData = {
-  -readonly [K in keyof typeof backupTables]: Record<string, unknown>[];
+  -readonly [K in BackupTableName]: Record<string, unknown>[];
 };
+
+// Parents before children, so every foreign key already resolves when its row arrives.
+const restoreInsertOrder = [
+  "taskSeries",
+  "tasks",
+  "taskSubmissions",
+  "proofAssets",
+  "rewardItems",
+  "redemptions",
+  "pointLedger",
+  "dailyActivity",
+  "achievementUnlocks",
+  "auditLogs",
+  "idempotencyKeys",
+  "domainEvents",
+  "webhookDeliveries"
+] as const satisfies readonly BackupTableName[];
 
 type ProofArchiveTarget = {
   targetKey: string;
@@ -609,68 +631,85 @@ function prepareProofTargets(parsed: ParsedBackup): Map<string, ProofArchiveTarg
   return expected;
 }
 
+async function insertBackupRows(
+  tx: any,
+  name: BackupTableName,
+  rows: Record<string, unknown>[]
+): Promise<void> {
+  const table = backupTables[name];
+  const rowsPerInsert = Math.floor(
+    MAX_INSERT_PARAMETERS / Object.keys(getTableColumns(table as any)).length
+  );
+  for (let start = 0; start < rows.length; start += rowsPerInsert) {
+    await tx.insert(table).values(reviveRows(rows.slice(start, start + rowsPerInsert)));
+  }
+}
+
+// Driver errors embed the full SQL and every bound value, so only a short
+// machine-readable code such as SQLITE_CONSTRAINT_FOREIGNKEY may be logged.
+function safeErrorCode(error: unknown): string {
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    const { code, extendedCode } = current as { code?: unknown; extendedCode?: unknown };
+    for (const candidate of [extendedCode, code]) {
+      if (typeof candidate === "string" && /^[A-Za-z0-9_]{1,64}$/.test(candidate)) {
+        return candidate;
+      }
+    }
+    current = current.cause;
+  }
+  return "unknown";
+}
+
 async function replaceDatabase(data: BackupData): Promise<void> {
-  await runTransaction(async (tx: any) => {
-    await tx.delete(webhookDeliveries);
-    await tx.delete(domainEvents);
-    await tx.delete(idempotencyKeys);
-    await tx.delete(achievementUnlocks);
-    await tx.delete(pointLedger);
-    await tx.delete(proofAssets);
-    await tx.delete(taskSubmissions);
-    await tx.delete(tasks);
-    await tx.delete(taskSeries);
-    await tx.delete(redemptions);
-    await tx.delete(rewardItems);
-    await tx.delete(dailyActivity);
-    await tx.delete(auditLogs);
+  let stage = "clearing current rows";
+  try {
+    await runTransaction(async (tx: any) => {
+      await tx.delete(webhookDeliveries);
+      await tx.delete(domainEvents);
+      await tx.delete(idempotencyKeys);
+      await tx.delete(achievementUnlocks);
+      await tx.delete(pointLedger);
+      await tx.delete(proofAssets);
+      await tx.delete(taskSubmissions);
+      await tx.delete(tasks);
+      await tx.delete(taskSeries);
+      await tx.delete(redemptions);
+      await tx.delete(rewardItems);
+      await tx.delete(dailyActivity);
+      await tx.delete(auditLogs);
 
-    const settings = reviveRows(data.settings)[0];
-    delete settings.id;
-    delete settings.initialized;
-    delete settings.createdAt;
-    await tx.update(appSettings).set(settings).where(eq(appSettings.id, 1));
+      stage = "settings and statistics";
+      const settings = reviveRows(data.settings)[0];
+      delete settings.id;
+      delete settings.initialized;
+      delete settings.createdAt;
+      await tx.update(appSettings).set(settings).where(eq(appSettings.id, 1));
 
-    if (data.taskSeries.length) await tx.insert(taskSeries).values(reviveRows(data.taskSeries));
-    if (data.tasks.length) await tx.insert(tasks).values(reviveRows(data.tasks));
-    if (data.taskSubmissions.length) {
-      await tx.insert(taskSubmissions).values(reviveRows(data.taskSubmissions));
-    }
-    if (data.proofAssets.length) await tx.insert(proofAssets).values(reviveRows(data.proofAssets));
-    if (data.rewardItems.length) await tx.insert(rewardItems).values(reviveRows(data.rewardItems));
-    if (data.redemptions.length) await tx.insert(redemptions).values(reviveRows(data.redemptions));
-    if (data.pointLedger.length) await tx.insert(pointLedger).values(reviveRows(data.pointLedger));
-    if (data.dailyActivity.length) {
-      await tx.insert(dailyActivity).values(reviveRows(data.dailyActivity));
-    }
+      const stats = reviveRows(data.statistics)[0];
+      delete stats.id;
+      await tx.update(statistics).set(stats).where(eq(statistics.id, 1));
 
-    const stats = reviveRows(data.statistics)[0];
-    delete stats.id;
-    await tx.update(statistics).set(stats).where(eq(statistics.id, 1));
+      for (const name of restoreInsertOrder) {
+        stage = name;
+        await insertBackupRows(tx, name, data[name]);
+      }
 
-    if (data.achievementUnlocks.length) {
-      await tx.insert(achievementUnlocks).values(reviveRows(data.achievementUnlocks));
-    }
-    if (data.auditLogs.length) await tx.insert(auditLogs).values(reviveRows(data.auditLogs));
-    if (data.idempotencyKeys.length) {
-      await tx.insert(idempotencyKeys).values(reviveRows(data.idempotencyKeys));
-    }
-    if (data.domainEvents.length) {
-      await tx.insert(domainEvents).values(reviveRows(data.domainEvents));
-    }
-    if (data.webhookDeliveries.length) {
-      await tx.insert(webhookDeliveries).values(reviveRows(data.webhookDeliveries));
-    }
-    await tx.insert(auditLogs).values({
-      id: createId("audit"),
-      actor: "user",
-      action: "backup.restored",
-      entityType: "system",
-      summary: "Application data restored from a trusted backup"
+      stage = "reconciliation";
+      await tx.insert(auditLogs).values({
+        id: createId("audit"),
+        actor: "user",
+        action: "backup.restored",
+        entityType: "system",
+        summary: "Application data restored from a trusted backup"
+      });
+      await seedDatabase(tx, false);
+      await reconcileInTransaction(tx);
     });
-    await seedDatabase(tx, false);
-    await reconcileInTransaction(tx);
-  });
+  } catch (error) {
+    console.warn(`Backup restore rolled back during ${stage}: ${safeErrorCode(error)}`);
+    throw error;
+  }
 }
 
 export async function restoreBackupFromFile(filePath: string): Promise<void> {
@@ -760,11 +799,9 @@ export async function restoreBackupFromFile(filePath: string): Promise<void> {
       try {
         await replaceDatabase(data);
         databaseReplaced = true;
-      } catch (error) {
+      } catch {
         throw invalidBackup(
-          error instanceof Error
-            ? `Backup database rows are inconsistent: ${error.message}`
-            : "Backup database rows are inconsistent"
+          "Backup database rows are inconsistent, so nothing was restored"
         );
       }
       await removeStoredProofs(oldProofs);
