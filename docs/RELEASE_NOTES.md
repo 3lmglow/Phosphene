@@ -4,7 +4,7 @@
 
 网页界面整体换成了“两个人共用的一本约定本”：点阵纸、墨线、钢笔蓝和红色印章，App 图标也换成了新的“两颗星”。本版本同时修复了三个影响使用的问题，并升级了三个存在高危漏洞的依赖，**建议所有用户更新**。
 
-相较 v1.1.1，本版本不改变数据库结构、配置项或 MCP 接口，无需迁移；如需退回旧界面，固定使用 `1.1.1` 镜像即可，数据不受影响。
+相较 v1.1.1，本版本不改变数据库结构、配置项或 MCP 接口，无需迁移；如需退回旧界面，可以改用官方镜像 `ghcr.io/3lmglow/phosphene:1.1.1`；使用自己 fork 构建的镜像时，fork 里没有版本号标签，请改用 v1.1.1 那次构建的 `sha-` 标签，查找方法见 [回滚](DEPLOYMENT.md#回滚)。数据不受影响。
 
 ### 新界面
 
@@ -44,8 +44,14 @@
 
 ### 如何更新
 
+- 使用自己 fork 构建的镜像（`ghcr.io/你的用户名/phosphene:main`）：
+  1. 打开你的 fork 首页，点 **Sync fork → Update branch**。
+  2. 打开 **Actions → Container**，等新的一次构建出现绿色对勾；没有新的运行时，点 **Run workflow** 手动运行一次。
+  3. 到你的平台或服务器上重新部署，让它拉取新镜像。
+
+  完整步骤见 [同步你的 fork](DEPLOYMENT.md#同步你的-fork) 和 [让部署使用新镜像](DEPLOYMENT.md#让部署使用新镜像)。
 - 使用官方 `ghcr.io/3lmglow/phosphene:latest` 镜像：重新拉取镜像并重新部署。
-- 固定镜像版本的用户：将标签改为 `ghcr.io/3lmglow/phosphene:1.2.1` 后部署。镜像支持 `linux/amd64` 和 `linux/arm64`。
+- 固定官方镜像版本的用户：将标签改为 `ghcr.io/3lmglow/phosphene:1.2.1` 后部署。镜像支持 `linux/amd64` 和 `linux/arm64`。
 - 从源码部署的用户：同步更新后重新安装依赖并重新构建。
 
 更新后访问 `/healthz`，版本号应为 `1.2.1`。
@@ -56,8 +62,14 @@
 
 相较 v1.1.0，本版本不改变应用功能、数据库结构或配置项，无需额外迁移。
 
+- 使用自己 fork 构建的镜像（`ghcr.io/你的用户名/phosphene:main`）：
+  1. 打开你的 fork 首页，点 **Sync fork → Update branch**。
+  2. 打开 **Actions → Container**，等新的一次构建出现绿色对勾；没有新的运行时，点 **Run workflow** 手动运行一次。
+  3. 到你的平台或服务器上重新部署，让它拉取新镜像。
+
+  完整步骤见 [同步你的 fork](DEPLOYMENT.md#同步你的-fork) 和 [让部署使用新镜像](DEPLOYMENT.md#让部署使用新镜像)。
 - 使用官方 `ghcr.io/3lmglow/phosphene:latest` 镜像：重新拉取镜像并重新部署。
-- 固定镜像版本的用户：将标签改为 `ghcr.io/3lmglow/phosphene:1.1.1` 后部署。镜像支持 `linux/amd64` 和 `linux/arm64`。
+- 固定官方镜像版本的用户：将标签改为 `ghcr.io/3lmglow/phosphene:1.1.1` 后部署。镜像支持 `linux/amd64` 和 `linux/arm64`。
 - 从源码部署的用户：同步更新后重新构建；自行管理 Node.js 时，24.x 至少使用 24.22.1，22.x 至少使用 22.23.4。
 
 更新后访问 `/healthz`，版本号应为 `1.1.1`。
@@ -122,7 +134,7 @@ MCP SDK 更新到 1.32.1，Express 更新到 5.3.0，Multer 更新到 2.4.0，Sh
 
 本版本会在启动时自动升级数据库：新增授权连接所需的表，并重建事件表。更新前请先在“设置 → 数据与备份”中导出一份 ZIP；更新后如需回到旧版本，请使用更新前的 ZIP 或卷快照恢复。本版本不新增必填环境变量。
 
-- **使用自己 fork 构建镜像：**在 fork 首页点击 **Sync fork**，等待 Actions 构建完成后重新部署。
+- **使用自己 fork 构建镜像：**在 fork 首页点击 **Sync fork**，等待 Actions 构建完成后重新部署，详细步骤见 [同步你的 fork](DEPLOYMENT.md#同步你的-fork)。
 - **使用 `ghcr.io/3lmglow/phosphene:latest`：**照常重新部署即可，也建议借此改用自己 fork 构建的镜像。自本版本起，`latest` 只在发布正式版本时更新。
 - **使用 Docker Compose 从源码构建：**执行 `git pull --ff-only` 后，照常运行 `docker compose up -d --build`，数据卷保持不变。
 

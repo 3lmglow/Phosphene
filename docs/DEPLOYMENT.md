@@ -319,6 +319,16 @@ WAL 和 SHM 文件只在 SQLite 运行期间出现。
 2. 平台支持卷快照时，再创建一份 `/data` 快照。
 3. 阅读 [更新说明](RELEASE_NOTES.md)。
 
+### 订阅新版本通知
+
+Phosphene 不会自动更新，网站里也不会提醒有新版本。想在发布新版本时收到通知，可以让 GitHub 通知你（需要登录 GitHub）：
+
+1. 打开原仓库 [3lmglow/Phosphene](https://github.com/3lmglow/Phosphene)，不是你自己的 fork。
+2. 点右上角的 **Watch**，选择 **Custom**。
+3. 勾选 **Releases**，点 **Apply**。
+
+之后每次发布新版本，GitHub 都会通知你，通知的方式可以在 GitHub 账号的 Notifications 设置里调整。也可以随时打开 [Releases 页面](https://github.com/3lmglow/Phosphene/releases) 查看最新版本；你正在运行的版本，访问 `https://你的地址/healthz` 就能看到。
+
 ### 同步你的 fork
 
 1. 打开你的 fork 首页。看到 “This branch is … commits behind” 时，点 **Sync fork → Update branch**。
@@ -364,7 +374,7 @@ PWA 仍显示旧页面时，完全关闭已安装应用，再从浏览器打开�
 
 回滚要同时考虑应用镜像和数据库：
 
-- 数据库结构仍兼容旧版本时，可以只回滚应用：把镜像标签换成之前的 `sha-xxxxxxx` 并重新部署。
+- 数据库结构仍兼容旧版本时，可以只回滚应用：把镜像标签换成之前的 `sha-xxxxxxx` 并重新部署。你的 fork 里没有版本号标签，只有 `main` 和 `sha-` 开头的标签：在 fork 的 **Actions → Container** 里点开旧的那次运行，看到的提交号前 7 位就是标签里 `sha-` 后面的部分；也可以在 fork 首页右侧 **Packages** 里查看已有的标签。想直接回到某个正式版本，也可以临时改用官方镜像 `ghcr.io/3lmglow/phosphene:版本号`，例如 `ghcr.io/3lmglow/phosphene:1.1.1`。
 - migration 已改变旧版本无法读取的结构时，恢复匹配的旧应用版本和升级前的卷快照或 ZIP。
 
 先保留当前数据与第一条 migration 错误，再执行回滚。普通更新问题不需要删除服务、删除存储或重新认领实例。

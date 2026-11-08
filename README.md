@@ -158,6 +158,8 @@ Webhook 与业务结果一起可靠落库，网络失败会自动重试；轮询
 
 升级前先下载 ZIP（平台支持时再创建快照），再部署新版本。应用启动时会自动运行数据库 migration。
 
+使用自己 fork 的用户，更新步骤见 [同步你的 fork](docs/DEPLOYMENT.md#同步你的-fork)；想在发布新版本时收到 GitHub 通知，见 [订阅新版本通知](docs/DEPLOYMENT.md#订阅新版本通知)。
+
 ## Docker Compose
 
 在自己的电脑上试用时，安装 Docker 后运行：
