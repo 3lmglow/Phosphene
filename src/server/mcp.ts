@@ -16,6 +16,7 @@ import {
   adjustPointsSchema,
   createTaskSchema,
   manageTaskSchema,
+  paginationCursorSchema,
   rewardManageSchema,
   taskQuerySchema
 } from "../shared/schemas";
@@ -93,7 +94,7 @@ function createMcpServer() {
 
   server.tool(
     "query_tasks",
-    "Find tasks and, when requested, their proof submissions. Hidden surprises are visible to AI.",
+    "Find tasks and, when requested, their proof submissions. Hidden surprises are visible to AI. Results are newest first; when next_cursor is not null, pass it back as cursor with the same filters to read the next page.",
     {
       task_id: z.string().optional(),
       status: z.enum(TASK_STATUSES).optional(),
@@ -102,7 +103,9 @@ function createMcpServer() {
       to: z.string().optional(),
       include_proof: z.boolean().default(false),
       limit: z.number().int().min(1).max(100).default(30),
-      cursor: z.string().optional()
+      cursor: paginationCursorSchema
+        .optional()
+        .describe("The next_cursor from the previous page. Omit it for the first page.")
     },
     async (args) => {
       const input = taskQuerySchema.parse(args);
@@ -140,11 +143,14 @@ function createMcpServer() {
 
   server.tool(
     "query_history",
-    "Query completed/final tasks, point ledger, redemptions, audit history, or the durable domain event feed. For event consumption, start with after_sequence=0 and persist the returned next_sequence cursor.",
+    "Query completed/final tasks, point ledger, redemptions, audit history, or the durable domain event feed. History is newest first: when has_more is true, call again with the same kind and pass next_cursor as cursor to read older entries. For event consumption, start with after_sequence=0 and persist the returned next_sequence cursor.",
     {
       kind: z.enum(["all", "tasks", "points", "redemptions", "audit", "events"]).default("all"),
       limit: z.number().int().min(1).max(100).default(30),
-      after_sequence: z.number().int().min(0).optional()
+      after_sequence: z.number().int().min(0).optional(),
+      cursor: paginationCursorSchema
+        .optional()
+        .describe("The next_cursor from the previous page of the same kind. Omit it for the first page. Not used for events.")
     },
     async (args) => result(await queryHistory(args))
   );

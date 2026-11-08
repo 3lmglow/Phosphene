@@ -145,6 +145,8 @@ pnpm build
 
 支持按任务 id、状态、类型、日期与 cursor 查询。AI 可以看见尚未向用户揭晓的 surprise。
 
+结果按创建时间从新到旧排列。响应的 `next_cursor` 不为 `null` 时，保持其他条件不变，把它作为 `cursor` 传回即可读取下一页。
+
 `include_proof: true` 会返回每次提交的文字、状态、驳回理由和图片元数据，并把私有审核预览作为 MCP image content 返回。
 
 ### `manage_task`
@@ -188,6 +190,12 @@ pnpm build
 - `events`
 - `all`
 
+除 `events` 外，结果按时间从新到旧排列，每页最多 `limit` 条。响应的 `has_more` 为 `true` 时，保持同一个 `kind`，把响应里的 `next_cursor` 作为 `cursor` 传回，就能继续读取更早的记录。同一毫秒内的多条记录也会完整翻页，不会被跳过。
+
+```json
+{ "kind": "audit", "limit": 50, "cursor": "pc_..." }
+```
+
 事件模式用于没有入站 Webhook 的 AI 宿主。消费者从 `after_sequence: 0` 开始，按顺序逐条处理；每个事件成功后保存该事件的 `sequence`。整页处理完成时，该值应等于响应的 `next_sequence`。完整流程见 [完成通知](WEBHOOKS.md)。
 
 ### `manage_rewards`
@@ -202,7 +210,7 @@ pnpm build
 - `penalty`：用户允许范围内的扣分
 - `correction`：账本校正
 
-`reason` 会显示在用户可见的积分历史中。penalty 服从惩罚暂停、每日上限和余额下限。
+`reason` 会显示在用户可见的积分历史中。penalty 服从惩罚暂停、每日上限和余额下限。调整前会先结算已经逾期的任务，所以余额下限按扣除逾期罚分后的余额计算。
 
 ## 幂等键
 

@@ -326,6 +326,9 @@ export const taskSubmissions = sqliteTable(
     submittedAt: integer("submitted_at", { mode: "timestamp_ms" })
       .notNull()
       .default(nowInMilliseconds),
+    // The user's local date when they submitted, so a later timezone change cannot move the
+    // completion day. Null on submissions made before this column existed.
+    submittedLocalDate: text("submitted_local_date"),
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
     reviewReason: text("review_reason")
   },

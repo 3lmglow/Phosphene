@@ -95,6 +95,12 @@ function beforeCursor(
   );
 }
 
+// Timestamps are stored to the millisecond. Going through String(date) keeps only whole
+// seconds, so a cursor built that way skips the rest of the rows from the same second.
+function rowTimestamp(value: unknown): Date {
+  return value instanceof Date ? value : new Date(value as string | number);
+}
+
 function presentRedemption(row: any, aiLabel: string) {
   return {
     ...row,
@@ -1027,7 +1033,8 @@ export async function manageTask(input: ManageTaskInput, actor: Actor = "AI") {
       );
       if (input.decision === "approve") {
         const settings = await getSettings(tx);
-        const completionDate = localDate(submission.submittedAt, settings.timezone);
+        const completionDate =
+          submission.submittedLocalDate ?? localDate(submission.submittedAt, settings.timezone);
         await tx
           .update(taskSubmissions)
           .set({ status: "approved", reviewedAt: now, reviewReason: input.reason })
@@ -1086,6 +1093,8 @@ export async function submitTask(
       .where(eq(taskSubmissions.taskId, task.id));
     const submissionId = createId("submission");
     const now = new Date();
+    const settings = await getSettings(tx);
+    const submittedLocalDate = localDate(now, settings.timezone);
     await tx.insert(taskSubmissions).values({
       id: submissionId,
       taskId: task.id,
@@ -1093,6 +1102,7 @@ export async function submitTask(
       proofText,
       status: task.verificationMode === "self" ? "approved" : "pending",
       submittedAt: now,
+      submittedLocalDate,
       reviewedAt: task.verificationMode === "self" ? now : null
     });
     if (storedProofs.length) {
@@ -1105,14 +1115,7 @@ export async function submitTask(
     }
 
     if (task.verificationMode === "self") {
-      const settings = await getSettings(tx);
-      await completeTask(
-        tx,
-        task,
-        localDate(now, settings.timezone),
-        actor,
-        submissionId
-      );
+      await completeTask(tx, task, submittedLocalDate, actor, submissionId);
       await recomputeActivityAndStats(tx);
       return { task_id: task.id, submission_id: submissionId, status: "completed" };
     }
@@ -1307,7 +1310,7 @@ export async function queryHistory(input: {
         date: row.redeemedAt
       }))
     ].sort((a, b) => {
-      const dateDifference = new Date(String(b.date)).valueOf() - new Date(String(a.date)).valueOf();
+      const dateDifference = rowTimestamp(b.date).valueOf() - rowTimestamp(a.date).valueOf();
       if (dateDifference) return dateDifference;
       const bId = (b as Record<string, unknown>).id;
       const aId = (a as Record<string, unknown>).id;
@@ -1319,7 +1322,7 @@ export async function queryHistory(input: {
     result.timeline = page;
     result.next_cursor = page.length
       ? encodePageCursor(
-          new Date(String(page.at(-1)?.date)),
+          rowTimestamp(page.at(-1)?.date),
           `${String(page.at(-1)?.eventKind)}:${String((page.at(-1) as Record<string, unknown>)?.id)}`
         )
       : null;
@@ -1339,7 +1342,7 @@ export async function queryHistory(input: {
   const last = selectedRows.at(-1);
   result.next_cursor = last
     ? encodePageCursor(
-        new Date(String(last[dateField[selectedKind]])),
+        rowTimestamp(last[dateField[selectedKind]]),
         `${selectedKind}:${String(last.id)}`
       )
     : null;
@@ -1430,8 +1433,10 @@ export async function manageRewards(input: RewardManageInput, actor: Actor = "AI
 }
 
 export async function redeemReward(rewardId: string, idempotencyKey: string) {
-  return runTransaction(async (tx: Db) =>
-    idempotent(tx, "redeem_reward", idempotencyKey, { reward_id: rewardId }, async () => {
+  return runTransaction(async (tx: Db) => {
+    // Settle overdue penalties first, so spending cannot empty the balance they were owed from.
+    await reconcileInTransaction(tx);
+    return idempotent(tx, "redeem_reward", idempotencyKey, { reward_id: rewardId }, async () => {
       const settings = await getSettings(tx);
       const reward = assertFound(
         await tx.query.rewardItems.findFirst({ where: and(eq(rewardItems.id, rewardId), eq(rewardItems.active, true)) }),
@@ -1474,13 +1479,15 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
       });
       await recomputeActivityAndStats(tx);
       return { redemption, balance: balance - reward.cost };
-    })
-  );
+    });
+  });
 }
 
 export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI") {
-  return runTransaction(async (tx: Db) =>
-    idempotent(tx, "adjust_points", input.idempotency_key, input, async () => {
+  return runTransaction(async (tx: Db) => {
+    // Penalties and corrections are capped by the balance, so overdue penalties settle first.
+    await reconcileInTransaction(tx);
+    return idempotent(tx, "adjust_points", input.idempotency_key, input, async () => {
       const settings = await getSettings(tx);
       const now = new Date();
       const today = localDate(now, settings.timezone);
@@ -1520,8 +1527,8 @@ export async function adjustPoints(input: AdjustPointsInput, actor: Actor = "AI"
       await audit(tx, actor, `points.${input.kind}`, "point_ledger", entry.id, input.reason, { amount });
       await recomputeActivityAndStats(tx);
       return { entry, balance: await currentBalance(tx), applied_amount: amount };
-    })
-  );
+    });
+  });
 }
 
 export async function listAchievements() {

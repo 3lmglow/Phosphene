@@ -1,0 +1,1 @@
+ALTER TABLE `task_submissions` ADD `submitted_local_date` text;
