@@ -1,7 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
+import dns from "node:dns";
 import fs from "node:fs/promises";
-import type { AddressInfo } from "node:net";
+import http from "node:http";
+import https from "node:https";
+import net, { type AddressInfo } from "node:net";
 import path from "node:path";
+import zlib from "node:zlib";
 import { auth, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -16,13 +20,41 @@ import { handleMcp } from "../src/server/mcp";
 import oauthRouter from "../src/server/oauth";
 import router, { apiErrorHandler } from "../src/server/routes";
 import { requireAi } from "../src/server/services/auth";
-import { isClientMetadataDocumentUrl } from "../src/server/services/oauth";
+import { isClientMetadataDocumentUrl, isPublicAddress } from "../src/server/services/oauth";
 
 const CALLBACK = "http://127.0.0.1:9/callback";
 const realFetch = globalThis.fetch;
 let server: ReturnType<typeof express.application.listen>;
 let base: string;
 const jar = new Map<string, string>();
+let metadataServer: http.Server;
+let metadataHandler: http.RequestListener = (_request, response) => response.writeHead(404).end();
+
+// Answers the server's HTTPS metadata requests from a local plain-HTTP server instead of the internet.
+// It connects by IP, so the public-address check is bypassed here and tested separately below.
+function serveMetadata(handler: http.RequestListener) {
+  metadataHandler = handler;
+  const { port } = metadataServer.address() as AddressInfo;
+  vi.spyOn(https, "get").mockImplementation(((url: string, options: https.RequestOptions, callback: (response: http.IncomingMessage) => void) => {
+    const target = new URL(url);
+    const { lookup: _lookup, ...rest } = options;
+    return http.get({ ...rest, host: "127.0.0.1", port, path: target.pathname, headers: { ...rest.headers, host: target.host } }, callback);
+  }) as unknown as typeof https.get);
+}
+
+function metadataDocument(clientId: string, extra: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    client_id: clientId,
+    client_name: "Metadata Client",
+    redirect_uris: ["https://client.example.com/callback"],
+    ...extra
+  });
+}
+
+// Resolves when the connection closes; for a body that never ends, only the client hanging up can do that.
+function closedByClient(response: http.ServerResponse) {
+  return new Promise<void>((resolve) => response.once("close", resolve));
+}
 
 async function call(pathname: string, init: RequestInit = {}, withSession = true) {
   const headers = new Headers(init.headers);
@@ -137,6 +169,8 @@ beforeAll(async () => {
     handleMcp(request, response).catch(next);
   });
   app.use(apiErrorHandler);
+  metadataServer = http.createServer((request, response) => metadataHandler(request, response));
+  await new Promise<void>((resolve) => metadataServer.listen(0, "127.0.0.1", resolve));
   server = app.listen(0, "127.0.0.1");
   if (!server.listening) await new Promise<void>((resolve) => server.once("listening", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -158,6 +192,8 @@ afterAll(async () => {
   const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   server.closeAllConnections();
   await closed;
+  metadataServer.closeAllConnections();
+  await new Promise<void>((resolve) => metadataServer.close(() => resolve()));
   await shutdownDatabase();
 });
 
@@ -298,14 +334,10 @@ describe.sequential("OAuth for remote MCP connectors", () => {
 
   it("supports clients identified by a metadata document URL", async () => {
     const clientId = "https://client.example.com/oauth/client.json";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url !== clientId) return realFetch(input, init);
-      return new Response(JSON.stringify({
-        client_id: clientId,
-        client_name: "Metadata Client",
-        redirect_uris: ["https://client.example.com/callback"]
-      }), { headers: { "content-type": "application/json" } });
+    const requests: http.IncomingMessage[] = [];
+    serveMetadata((request, response) => {
+      requests.push(request);
+      response.writeHead(200, { "content-type": "application/json" }).end(metadataDocument(clientId));
     });
     const params = {
       response_type: "code",
@@ -318,6 +350,146 @@ describe.sequential("OAuth for remote MCP connectors", () => {
     expect(details.body.data).toEqual({ client_name: "Metadata Client", redirect_host: "client.example.com" });
     const mismatch = await authorize({ ...params, redirect_uri: "https://client.example.com/other" });
     expect(mismatch.searchParams.get("error")).toBe("invalid_redirect_uri");
+    expect(requests[0].url).toBe("/oauth/client.json");
+    expect(requests[0].headers["accept-encoding"]).toBe("identity");
+  });
+
+  it("stops reading oversized metadata documents instead of buffering them", async () => {
+    const params = {
+      response_type: "code",
+      client_id: "https://client.example.com/oauth/client.json",
+      code_challenge: pkce().challenge,
+      code_challenge_method: "S256"
+    };
+    // One body declares a 50 MB length and the other declares none; both stream forever.
+    for (const headers of [{ "content-length": String(50 * 1024 * 1024) }, {}]) {
+      let hungUp!: Promise<void>;
+      serveMetadata((_request, response) => {
+        hungUp = closedByClient(response);
+        response.writeHead(200, { "content-type": "application/json", ...headers });
+        const chunk = " ".repeat(1024);
+        const pump = () => {
+          while (!response.destroyed && response.write(chunk));
+          if (!response.destroyed) response.once("drain", pump);
+        };
+        response.write("{");
+        pump();
+      });
+      const started = Date.now();
+      expect((await authorize(params)).searchParams.get("error")).toBe("invalid_client");
+      await hungUp;
+      // Far sooner than the 5 s timeout, so the size limit is what ended the download.
+      expect(Date.now() - started).toBeLessThan(2500);
+    }
+  });
+
+  it("does not inflate compressed metadata documents past the size limit", async () => {
+    const clientId = "https://client.example.com/oauth/client.json";
+    const params = { response_type: "code", client_id: clientId, code_challenge: pkce().challenge, code_challenge_method: "S256" };
+    let body = zlib.gzipSync(metadataDocument(clientId));
+    serveMetadata((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" }).end(body);
+    });
+    // A server that compresses although identity was requested still works for a normal document.
+    expect((await authorize(params)).searchParams.get("request")).toBeTruthy();
+    // A small gzip that would inflate to megabytes of otherwise valid JSON is refused.
+    body = zlib.gzipSync(metadataDocument(clientId, { padding: " ".repeat(2 * 1024 * 1024) }));
+    expect(body.length).toBeLessThan(8 * 1024);
+    expect((await authorize(params)).searchParams.get("error")).toBe("invalid_client");
+  });
+
+  it("does not follow redirects from metadata document URLs", async () => {
+    serveMetadata((_request, response) => {
+      response.writeHead(302, { location: "https://client.example.com/elsewhere.json" }).end();
+    });
+    const location = await authorize({
+      response_type: "code",
+      client_id: "https://client.example.com/oauth/client.json",
+      code_challenge: pkce().challenge,
+      code_challenge_method: "S256"
+    });
+    expect(location.searchParams.get("error")).toBe("invalid_client");
+  });
+
+  it("refuses metadata hosts that resolve to non-public addresses", async () => {
+    let connections = 0;
+    const listener = net.createServer((socket) => {
+      connections += 1;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    const { port } = listener.address() as AddressInfo;
+    const resolved = new Map([
+      ["loopback.example.com", ["127.0.0.1"]],
+      ["mapped.example.com", ["::ffff:127.0.0.1"]],
+      ["cloud-metadata.example.com", ["169.254.169.254"]],
+      ["private.example.com", ["10.0.0.8"]],
+      ["unique-local.example.com", ["fd00::8"]],
+      // Every address must be public, or a rebinding host could hand the private one to the connection.
+      ["mixed.example.com", ["1.1.1.1", "127.0.0.1"]]
+    ]);
+    const realLookup = dns.lookup;
+    vi.spyOn(dns, "lookup").mockImplementation(((hostname: string, options: dns.LookupOptions, callback: (...args: unknown[]) => void) => {
+      const addresses = resolved.get(hostname)?.map((address) => ({ address, family: net.isIP(address) }));
+      if (!addresses) return realLookup(hostname, options, callback);
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0].address, addresses[0].family);
+    }) as unknown as typeof dns.lookup);
+    try {
+      for (const hostname of resolved.keys()) {
+        const clientId = `https://${hostname}:${port}/oauth/client.json`;
+        expect(isClientMetadataDocumentUrl(clientId)).toBe(true);
+        const location = await authorize({
+          response_type: "code",
+          client_id: clientId,
+          code_challenge: pkce().challenge,
+          code_challenge_method: "S256"
+        });
+        expect(location.searchParams.get("error")).toBe("invalid_client");
+      }
+      expect(dns.lookup).toHaveBeenCalledTimes(resolved.size);
+      expect(connections).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  });
+
+  it("treats only globally routable addresses as public", () => {
+    for (const address of ["8.8.8.8", "100.63.255.255", "100.128.0.0", "172.15.255.255", "172.32.0.0", "2606:4700:4700::1111"]) {
+      expect(isPublicAddress(address), address).toBe(true);
+    }
+    for (const address of [
+      "0.0.0.0",
+      "10.0.0.1",
+      "100.64.0.1",
+      "127.0.0.1",
+      "169.254.169.254",
+      "172.16.0.1",
+      "172.31.255.255",
+      "192.168.1.1",
+      "198.18.0.1",
+      "203.0.113.5",
+      "224.0.0.1",
+      "255.255.255.255",
+      "::",
+      "::1",
+      "::ffff:127.0.0.1",
+      "::ffff:7f00:1",
+      "::ffff:10.0.0.1",
+      "::ffff:8.8.8.8",
+      "64:ff9b::a9fe:a9fe",
+      "fc00::1",
+      "fd12:3456::1",
+      "fe80::1",
+      "fe80::1%eth0",
+      "ff02::1",
+      "2001:db8::1",
+      "2002:7f00:1::",
+      "client.example.com",
+      ""
+    ]) {
+      expect(isPublicAddress(address), address).toBe(false);
+    }
   });
 
   it("only fetches metadata documents from public HTTPS URLs", () => {

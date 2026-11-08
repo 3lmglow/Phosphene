@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import dns from "node:dns";
+import type { IncomingMessage } from "node:http";
+import https from "node:https";
+import { BlockList, isIPv4, isIPv6, type LookupFunction } from "node:net";
+import zlib from "node:zlib";
 import { and, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, runTransaction } from "../db/client";
@@ -15,6 +20,7 @@ const CODE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_REQUESTS = 100;
 const MAX_METADATA_DOCUMENT_BYTES = 8 * 1024;
+const METADATA_FETCH_TIMEOUT_MS = 5000;
 const LAST_USED_RESOLUTION_MS = 60 * 1000;
 
 export class OAuthError extends Error {
@@ -100,6 +106,112 @@ export function isClientMetadataDocumentUrl(value: string): boolean {
   );
 }
 
+// Private, loopback, link-local, CGNAT, documentation, multicast and other special-use ranges.
+const nonPublicAddresses = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 3]
+] as const) {
+  nonPublicAddresses.addSubnet(network, prefix, "ipv4");
+}
+// Teredo and 6to4 tunnel to an embedded IPv4 address; the rest are benchmarking and documentation ranges.
+for (const [network, prefix] of [
+  ["2001::", 32],
+  ["2001:2::", 48],
+  ["2001:db8::", 32],
+  ["2002::", 16],
+  ["3fff::", 20]
+] as const) {
+  nonPublicAddresses.addSubnet(network, prefix, "ipv6");
+}
+const globalUnicastIpv6 = new BlockList();
+globalUnicastIpv6.addSubnet("2000::", 3, "ipv6");
+
+export function isPublicAddress(address: string): boolean {
+  if (isIPv4(address)) return !nonPublicAddresses.check(address, "ipv4");
+  // Only global unicast IPv6 counts, which also refuses IPv4-mapped and NAT64 forms of internal IPv4 hosts.
+  return isIPv6(address) && globalUnicastIpv6.check(address, "ipv6") && !nonPublicAddresses.check(address, "ipv6");
+}
+
+// Used as the socket's resolver, so the address checked here is the one connected to and DNS rebinding
+// cannot swap in an internal address between the check and the request.
+const publicAddressLookup: LookupFunction = (hostname, options, callback) => {
+  dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
+    if (error) callback(error, "");
+    else if (!addresses.length || !addresses.every(({ address }) => isPublicAddress(address))) {
+      callback(Object.assign(new Error(`${hostname} does not resolve to a public address`), { code: "ENOTPUBLIC" }), "");
+    } else if (options.all) callback(null, addresses);
+    else callback(null, addresses[0].address, addresses[0].family);
+  });
+};
+
+function decodeMetadataBody(body: Buffer, encoding = "identity"): Buffer {
+  // Identity is requested, but a server that compresses anyway is unpacked only up to the size limit.
+  const limit = { maxOutputLength: MAX_METADATA_DOCUMENT_BYTES };
+  switch (encoding.trim().toLowerCase()) {
+    case "":
+    case "identity":
+      return body;
+    case "gzip":
+    case "x-gzip":
+      return zlib.gunzipSync(body, limit);
+    case "deflate":
+      return zlib.inflateSync(body, limit);
+    case "br":
+      return zlib.brotliDecompressSync(body, limit);
+    default:
+      throw new Error(`Client metadata uses unsupported encoding ${encoding}`);
+  }
+}
+
+async function downloadClientMetadata(url: string): Promise<Buffer> {
+  const response = await new Promise<IncomingMessage>((resolve, reject) => {
+    https
+      .get(
+        url,
+        {
+          agent: false,
+          lookup: publicAddressLookup,
+          signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS),
+          // Same User-Agent fetch sent before, so hosts that filter on it answer as they used to.
+          headers: { Accept: "application/json", "Accept-Encoding": "identity", "User-Agent": "node" }
+        },
+        resolve
+      )
+      .on("error", reject);
+  });
+  try {
+    const status = response.statusCode ?? 0;
+    // Redirects are not followed; like any other non-2xx answer they reject the client.
+    if (status < 200 || status > 299) throw new Error(`Client metadata returned HTTP ${status}`);
+    if (Number(response.headers["content-length"]) > MAX_METADATA_DOCUMENT_BYTES) {
+      throw new Error("Client metadata is too large");
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of response) {
+      size += chunk.length;
+      if (size > MAX_METADATA_DOCUMENT_BYTES) throw new Error("Client metadata is too large");
+      chunks.push(chunk);
+    }
+    return decodeMetadataBody(Buffer.concat(chunks), response.headers["content-encoding"]);
+  } finally {
+    response.destroy();
+  }
+}
+
 const metadataDocumentSchema = z.object({
   client_id: z.string(),
   client_name: z.string().trim().max(100).optional(),
@@ -107,14 +219,7 @@ const metadataDocumentSchema = z.object({
 });
 
 async function fetchClientMetadataDocument(clientId: string): Promise<OAuthClient> {
-  const response = await fetch(clientId, {
-    redirect: "error",
-    signal: AbortSignal.timeout(5000),
-    headers: { Accept: "application/json" }
-  });
-  if (!response.ok) throw new Error(`Client metadata returned HTTP ${response.status}`);
-  const text = await response.text();
-  if (Buffer.byteLength(text) > MAX_METADATA_DOCUMENT_BYTES) throw new Error("Client metadata is too large");
+  const text = new TextDecoder().decode(await downloadClientMetadata(clientId));
   const document = metadataDocumentSchema.parse(JSON.parse(text));
   if (document.client_id !== clientId) throw new Error("Client metadata does not describe this client_id");
   if (!document.redirect_uris.every(isAllowedRedirectUri)) throw new Error("Client metadata has an unsafe redirect URI");
