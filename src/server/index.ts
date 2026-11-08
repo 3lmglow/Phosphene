@@ -7,7 +7,7 @@ import helmet from "helmet";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { config } from "./config";
-import { initializeDatabase, shutdownDatabase } from "./db/client";
+import { getUpgradeBackupResult, initializeDatabase, shutdownDatabase } from "./db/client";
 import { seedDatabase } from "./db/seed";
 import { AppError } from "./errors";
 import { handleMcp } from "./mcp";
@@ -23,6 +23,7 @@ import {
   initializeStorage,
   pruneOrphanedProofFiles
 } from "./services/storage";
+import { startUpdateChecker, stopUpdateChecker } from "./services/updates";
 import {
   startWebhookWorker,
   stopWebhookWorker
@@ -155,6 +156,12 @@ if (config.NODE_ENV === "development") {
 app.use(apiErrorHandler);
 
 await initializeDatabase();
+const upgradeBackup = getUpgradeBackupResult();
+if (upgradeBackup && "path" in upgradeBackup) {
+  logger.info({ path: upgradeBackup.path, version }, "Saved a copy of the database before upgrading");
+} else if (upgradeBackup) {
+  logger.warn({ err: upgradeBackup.error, version }, "Could not save a copy of the database before upgrading");
+}
 await initializeStorage();
 await pruneOrphanedProofFiles();
 await seedDatabase();
@@ -191,12 +198,14 @@ const server = app.listen(config.PORT, () => {
   );
 });
 startWebhookWorker(logger);
+startUpdateChecker(logger);
 
 let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, "Shutting down Phosphene");
+  stopUpdateChecker();
   await stopWebhookWorker();
   const forced = setTimeout(() => {
     logger.error("Graceful shutdown timed out; closing remaining connections");

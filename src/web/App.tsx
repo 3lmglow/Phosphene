@@ -70,6 +70,15 @@ type Bootstrap = {
   ai_label: string;
 };
 
+type UpdateStatus = {
+  enabled: boolean;
+  current_version: string;
+  latest: { version: string; name: string; url: string; published_at: string | null } | null;
+  update_available: boolean;
+  checked_at: string | null;
+  check_failed: boolean;
+};
+
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
@@ -642,6 +651,8 @@ function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   useEffect(() => setMobileOpen(false), [location.pathname]);
+  const updates = useLoad<UpdateStatus>(() => api("/updates"), []);
+  const updateAvailable = Boolean(updates.data?.update_available);
   const nav = [
     ["/", "今日", LayoutDashboard],
     ["/tasks", "任务", ListTodo],
@@ -668,6 +679,7 @@ function AppShell({
             <NavLink key={to} to={to} end={to === "/"}>
               <Icon size={19} />
               <span>{label}</span>
+              {to === "/settings" && updateAvailable && <UpdateDot />}
             </NavLink>
           ))}
         </nav>
@@ -692,8 +704,13 @@ function AppShell({
       </aside>
       <main className="main-area">
         <header className="mobile-header">
-          <button className="icon-button" onClick={() => setMobileOpen(true)} aria-label="打开菜单">
+          <button
+            className="icon-button"
+            onClick={() => setMobileOpen(true)}
+            aria-label={updateAvailable ? "打开菜单（有新版本）" : "打开菜单"}
+          >
             <Menu />
+            {updateAvailable && <span className="update-dot" aria-hidden="true" />}
           </button>
           <span>Phosphene</span>
           <img className="mini-orbit" src="/icons/phosphene-stars-128.png" alt="" />
@@ -715,6 +732,8 @@ function AppShell({
                 installed={installed}
                 onInstall={onInstall}
                 onIdentityChanged={onIdentityChanged}
+                updates={updates.data}
+                onUpdatesChanged={updates.revalidate}
               />
             }
           />
@@ -732,6 +751,10 @@ function AppShell({
       {mobileOpen && <button className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-label="关闭菜单" />}
     </div>
   );
+}
+
+function UpdateDot() {
+  return <span className="update-dot" role="img" aria-label="有新版本" />;
 }
 
 function PageHeader({
@@ -1691,12 +1714,16 @@ function SettingsPage({
   installAvailable,
   installed,
   onInstall,
-  onIdentityChanged
+  onIdentityChanged,
+  updates,
+  onUpdatesChanged
 }: {
   installAvailable: boolean;
   installed: boolean;
   onInstall: () => Promise<void>;
   onIdentityChanged: (settings: Pick<Bootstrap, "timezone" | "user_label" | "ai_label">) => void;
+  updates: UpdateStatus | null;
+  onUpdatesChanged: () => Promise<void>;
 }) {
   const [tab, setTab] = useState("identity");
   const settings = useLoad<any>(() => api("/settings"), []);
@@ -1715,7 +1742,9 @@ function SettingsPage({
             ["security", <LockKeyhole />, "登录安全"]
           ].map(([value, icon, label]) => (
             <button key={value as string} className={tab === value ? "active" : ""} onClick={() => setTab(value as string)}>
-              {icon as ReactNode}{label as string}<ChevronRight />
+              {icon as ReactNode}{label as string}
+              {value === "data" && updates?.update_available && <UpdateDot />}
+              <ChevronRight />
             </button>
           ))}
         </nav>
@@ -1739,6 +1768,8 @@ function SettingsPage({
                   installAvailable={installAvailable}
                   installed={installed}
                   onInstall={onInstall}
+                  updates={updates}
+                  onUpdatesChanged={onUpdatesChanged}
                 />
               )}
               {tab === "security" && <><SecuritySettings /><RecoverySettings /></>}
@@ -2078,14 +2109,72 @@ function WebhookSettingsForm({
   );
 }
 
+function VersionSettings({ status, onChanged }: { status: UpdateStatus | null; onChanged: () => Promise<void> }) {
+  const timeZone = useContext(TimeZoneContext);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  // The menu loaded the status when the app opened; read it again whenever this panel is opened.
+  useEffect(() => void onChanged(), [onChanged]);
+  async function toggle(enabled: boolean) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await api("/updates", { method: "PUT", body: { enabled } });
+      await onChanged();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "保存失败。");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const latest = status?.latest;
+  const current = status ? `当前版本 ${status.current_version}` : "版本信息";
+  const [title, detail] = !status
+    ? [current, "暂时读不到版本信息，请稍后再打开这一页。"]
+    : status.update_available && latest
+      ? [
+          `有新版本：${latest.name}`,
+          `${current} · 新版本 ${latest.version}${latest.published_at ? ` · ${formatInstant(latest.published_at, false, timeZone)}发布` : ""}`
+        ]
+      : !status.enabled
+        ? [current, "已关闭自动检查新版本"]
+        : status.checked_at
+          ? [current, `已是最新版本 · ${formatInstant(status.checked_at, true, timeZone)} 检查`]
+          : status.check_failed
+            ? [current, "暂时连不上 GitHub，稍后会自动再试"]
+            : [current, "还没有检查过，服务器启动后会自动检查"];
+  return (
+    <>
+      <div className={`data-action ${status?.update_available ? "data-action--update" : ""}`}>
+        <div>{status?.update_available ? <Sparkles /> : <Check />}<div><strong>{title}</strong><span>{detail}</span></div></div>
+        {status?.update_available && latest && (
+          <a className="button button--primary" href={latest.url} target="_blank" rel="noopener noreferrer">查看更新方法</a>
+        )}
+      </div>
+      {status && (
+        <label className="switch-row">
+          <div><strong>自动检查新版本</strong><span>服务器每 12 小时向 GitHub 读取一次公开的最新版本号，不会发送你的任何数据。</span></div>
+          <input type="checkbox" checked={status.enabled} disabled={busy} onChange={(event) => void toggle(event.target.checked)} />
+          <i />
+        </label>
+      )}
+      {message && <div className="notice-banner">{message}</div>}
+    </>
+  );
+}
+
 function DataSettings({
   installAvailable,
   installed,
-  onInstall
+  onInstall,
+  updates,
+  onUpdatesChanged
 }: {
   installAvailable: boolean;
   installed: boolean;
   onInstall: () => Promise<void>;
+  updates: UpdateStatus | null;
+  onUpdatesChanged: () => Promise<void>;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState("");
@@ -2121,6 +2210,7 @@ function DataSettings({
   return (
     <div className="settings-form">
       <div className="settings-title"><div><h2>数据与备份</h2><p>导出包含业务记录、幂等记录和经过净化的私有图片。恢复需要再次验证密码。</p></div></div>
+      <VersionSettings status={updates} onChanged={onUpdatesChanged} />
       <div className="install-card">
         <div className="install-card__icon"><Download /></div>
         <div>

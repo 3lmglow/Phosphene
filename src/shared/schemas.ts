@@ -278,6 +278,10 @@ export const settingsSchema = z.object({
   boundary_notes: z.string().trim().max(4000)
 });
 
+export const updateCheckSettingsSchema = z.object({
+  enabled: z.boolean()
+});
+
 const webhookUrl = z
   .string()
   .trim()

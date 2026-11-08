@@ -14,6 +14,7 @@ import {
   setupSchema,
   submitTaskSchema,
   taskQuerySchema,
+  updateCheckSettingsSchema,
   webhookSettingsSchema
 } from "../shared/schemas";
 import { config } from "./config";
@@ -62,6 +63,7 @@ import {
   updateUserSettings
 } from "./services/domain";
 import { getObject, removeStoredProofs, saveProofImages } from "./services/storage";
+import { getUpdateStatus, setUpdateCheckEnabled } from "./services/updates";
 import {
   createWebhookTestEvent,
   getWebhookSettings,
@@ -381,6 +383,21 @@ router.put(
   "/settings",
   asyncRoute(async (request, response) => {
     response.json({ ok: true, data: await updateUserSettings(settingsSchema.parse(request.body)) });
+  })
+);
+
+router.get(
+  "/updates",
+  asyncRoute(async (_request, response) => {
+    response.json({ ok: true, data: await getUpdateStatus() });
+  })
+);
+
+router.put(
+  "/updates",
+  asyncRoute(async (request, response) => {
+    const input = updateCheckSettingsSchema.parse(request.body);
+    response.json({ ok: true, data: await setUpdateCheckEnabled(input.enabled) });
   })
 );
 

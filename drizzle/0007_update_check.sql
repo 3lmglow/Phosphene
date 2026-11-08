@@ -1,0 +1,1 @@
+ALTER TABLE `app_settings` ADD `update_check_enabled` integer DEFAULT true NOT NULL;

@@ -27,8 +27,11 @@ AI / MCP ──────┤           ├ REST API
 | Sharp | 图片解码、格式与像素验证、重新编码、预览生成 |
 | MCP SDK | 无状态 Streamable HTTP 工具服务与 stdio 转接 |
 | Webhook worker | 领取 delivery、签名、发送、重试和停止重试 |
+| 更新检查 | 每 12 小时读取 GitHub 上 `3lmglow/Phosphene` 的最新正式 Release，结果只保存在内存中，用于网站提示；用户可关闭 |
 
 容器中数据库和图片都位于 `/data`。应用镜像可以替换，持久卷保持不变。
+
+SQLite 头部的 `user_version` 记录上次打开数据库的应用版本。版本不同且数据库已存在时，启动先用 `VACUUM INTO` 把数据库复制到 `/data/backups/`，再运行 migration，成功后写入新版本号；只保留最近 3 份副本。复制失败只记录警告，不阻止启动。
 
 ## 任务模型
 

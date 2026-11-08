@@ -302,7 +302,7 @@ WAL 和 SHM 文件只在 SQLite 运行期间出现。
 
 1. 检查数据目录并以非 root 用户运行应用
 2. 打开 SQLite，启用 foreign keys、WAL 和 busy timeout
-3. 自动运行 Drizzle migrations
+3. 换了新版本时，先把数据库复制到 `/data/backups/`（见 [升级前的自动备份](BACKUP.md#升级前的自动备份)），再自动运行 Drizzle migrations
 4. 初始化图片与临时目录，清理中断操作遗留的临时文件
 5. 补充内置奖励和成就
 6. 生成缺失的每日任务并处理停机期间的逾期
@@ -321,13 +321,15 @@ WAL 和 SHM 文件只在 SQLite 运行期间出现。
 
 ### 订阅新版本通知
 
-Phosphene 不会自动更新，网站里也不会提醒有新版本。想在发布新版本时收到通知，可以让 GitHub 通知你（需要登录 GitHub）：
+Phosphene 不会自动更新，但会提醒你有新版本：服务器每 12 小时向 GitHub 读取一次公开的最新版本号，有新版本时，菜单里的“设置”旁边会出现一个小红点，“设置 → 数据与备份”会显示新版本的名称和更新方法的链接。不想让服务器联系 GitHub，可以在同一页关闭“自动检查新版本”。
+
+如果还想在发布新版本时收到邮件或 App 通知，可以让 GitHub 通知你（需要登录 GitHub）：
 
 1. 打开原仓库 [3lmglow/Phosphene](https://github.com/3lmglow/Phosphene)，不是你自己的 fork。
 2. 点右上角的 **Watch**，选择 **Custom**。
 3. 勾选 **Releases**，点 **Apply**。
 
-之后每次发布新版本，GitHub 都会通知你，通知的方式可以在 GitHub 账号的 Notifications 设置里调整。也可以随时打开 [Releases 页面](https://github.com/3lmglow/Phosphene/releases) 查看最新版本；你正在运行的版本，访问 `https://你的地址/healthz` 就能看到。
+之后每次发布新版本，GitHub 都会通知你，通知的方式可以在 GitHub 账号的 Notifications 设置里调整。也可以随时打开 [Releases 页面](https://github.com/3lmglow/Phosphene/releases) 查看最新版本；你正在运行的版本，在“设置 → 数据与备份”或 `https://你的地址/healthz` 都能看到。
 
 ### 同步你的 fork
 
@@ -352,7 +354,7 @@ Phosphene 不会自动更新，网站里也不会提醒有新版本。想在发�
   docker compose --profile https up -d --build
   ```
 
-应用启动时会自动运行数据库 migration。
+应用启动时会自动运行数据库 migration。换了新版本后第一次启动时，会先在 `/data/backups/` 自动保存一份升级前的数据库，只保留最近 3 份，见 [升级前的自动备份](BACKUP.md#升级前的自动备份)。
 
 更新后检查：
 
@@ -375,7 +377,7 @@ PWA 仍显示旧页面时，完全关闭已安装应用，再从浏览器打开�
 回滚要同时考虑应用镜像和数据库：
 
 - 数据库结构仍兼容旧版本时，可以只回滚应用：把镜像标签换成之前的 `sha-xxxxxxx` 并重新部署。你的 fork 里没有版本号标签，只有 `main` 和 `sha-` 开头的标签：在 fork 的 **Actions → Container** 里点开旧的那次运行，看到的提交号前 7 位就是标签里 `sha-` 后面的部分；也可以在 fork 首页右侧 **Packages** 里查看已有的标签。想直接回到某个正式版本，也可以临时改用官方镜像 `ghcr.io/3lmglow/phosphene:版本号`，例如 `ghcr.io/3lmglow/phosphene:1.1.1`。
-- migration 已改变旧版本无法读取的结构时，恢复匹配的旧应用版本和升级前的卷快照或 ZIP。
+- migration 已改变旧版本无法读取的结构时，恢复匹配的旧应用版本和升级前的卷快照、ZIP，或 `/data/backups/` 里的 [升级前的自动备份](BACKUP.md#升级前的自动备份)。
 
 先保留当前数据与第一条 migration 错误，再执行回滚。普通更新问题不需要删除服务、删除存储或重新认领实例。
 

@@ -1,6 +1,6 @@
 # 备份与恢复
 
-Phosphene 提供两种备份。它们用途不同，正式使用时建议同时保留。
+Phosphene 提供两种备份。它们用途不同，正式使用时建议同时保留。另外，每次换新版本时 Phosphene 会自动留一份升级前的数据库，作为额外的保险。
 
 ## 选择备份
 
@@ -8,6 +8,7 @@ Phosphene 提供两种备份。它们用途不同，正式使用时建议同时�
 | --- | --- | --- |
 | `/data` 卷快照 | SQLite、WAL/SHM、净化后的完整图片、当前实例凭据 | 升级前保护、整实例回滚 |
 | 网站 ZIP | 任务、提交、积分、奖励、成就、审计、幂等记录、领域事件、投递历史、净化后的完整图片与审核预览 | 日常下载、迁移、恢复业务数据 |
+| [升级前的自动备份](#升级前的自动备份) | 换新版本前的整个 SQLite 数据库，包括当前实例凭据；不含图片 | 新版本升级数据库出问题时退回 |
 
 网站 ZIP 不包含或覆盖：
 
@@ -31,6 +32,24 @@ docker compose --profile https start app
 ```
 
 停止期间网站和 MCP 不可用，通常只需要几秒。打包文件包含当前实例凭据，请和密码一样妥善保存。
+
+## 升级前的自动备份
+
+换了新版本后第一次启动时，Phosphene 会在升级数据库之前，把当前数据库完整复制一份到 `/data/backups/`。文件名以复制时间开头、以要升级到的版本结尾，例如 `2026-11-08T08-00-00.000Z-before-v1.2.2.sqlite`。只保留最近 3 份，更早的会自动删除。同一版本重新启动不会再复制；全新安装的实例也不会。
+
+这份副本不能代替网站 ZIP：它和数据库在同一个卷里，删除卷时会一起消失，也不包含图片。它的用处是：新版本升级数据库后出了问题，可以把数据库退回升级前。退回后，升级之后新增的任务、积分和提交也会一起回到升级前的样子。
+
+使用 Docker Compose 时，退回步骤是：
+
+```bash
+docker compose stop app
+docker compose run --rm --no-deps --user node --entrypoint ls app -l /data/backups
+docker compose run --rm --no-deps --user node --entrypoint sh app -c 'cp /data/backups/要用的文件名.sqlite /data/phosphene.sqlite && rm -f /data/phosphene.sqlite-wal /data/phosphene.sqlite-shm'
+```
+
+然后把镜像换回升级前的版本（见 [回滚](DEPLOYMENT.md#回滚)），再启动应用。`--user node` 让复制出的文件仍属于 Phosphene 自己，不要省略。容器平台上可以在平台提供的终端里执行同样的复制；做不到时，用网站 ZIP 或卷快照恢复。
+
+复制失败（例如磁盘已满）不会阻止应用启动，日志中会出现 `Could not save a copy of the database before upgrading`。
 
 ## 导出网站 ZIP
 

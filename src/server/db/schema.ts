@@ -77,6 +77,9 @@ export const appSettings = sqliteTable(
       .default(false),
     boundaryNotes: text("boundary_notes").notNull().default(""),
     boundaryVersion: integer("boundary_version").notNull().default(1),
+    updateCheckEnabled: integer("update_check_enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
     ...timestamps
   },
   (table) => [

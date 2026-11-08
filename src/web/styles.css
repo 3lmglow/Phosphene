@@ -912,6 +912,26 @@ h3 {
   color: var(--pen);
 }
 
+/* A small seal-red dot beside “设置” and “数据与备份” while a newer release exists. */
+.update-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--seal);
+}
+
+.mobile-header .icon-button {
+  position: relative;
+}
+
+.mobile-header .icon-button > .update-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  box-shadow: 0 0 0 2px var(--paper);
+}
+
 .sidebar__footer {
   margin-top: auto;
   padding-right: 20px;
@@ -3411,9 +3431,20 @@ h3 {
   height: 16px;
 }
 
-.data-action--warning > div > svg {
+.data-action--warning > div > svg,
+.data-action--update > div > svg {
   color: var(--seal);
   border-color: var(--seal);
+}
+
+/* Release titles can be long, so the link sits under the text instead of squeezing it. */
+.data-action--update {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.data-action--update .button {
+  justify-self: start;
+  margin-left: 54px;
 }
 
 .restore-confirm {
@@ -3985,6 +4016,10 @@ h3 {
 
   .data-action .button {
     width: 100%;
+  }
+
+  .data-action--update .button {
+    margin-left: 0;
   }
 
   .restore-confirm {
