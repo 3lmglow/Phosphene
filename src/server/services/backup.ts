@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { once } from "node:events";
+import { createReadStream, createWriteStream, type ReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Transform, type Writable } from "node:stream";
@@ -52,6 +53,13 @@ const MAX_BACKUP_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_INSERT_PARAMETERS = 8_000;
 
 export const MAX_BACKUP_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
+
+// The most archiver writes around one entry with forceZip64: a local header, a ZIP64
+// data descriptor and a central header with its ZIP64 extra field. The entry name
+// comes on top, once in each header.
+const ZIP_ENTRY_OVERHEAD_BYTES = 30 + 24 + 46 + 28;
+// The ZIP64 end record, its locator and the classic end record.
+const ZIP_END_OVERHEAD_BYTES = 56 + 20 + 22;
 
 const timestampFields = new Set([
   "createdAt",
@@ -494,7 +502,60 @@ async function buildBackupObjectMetadata(
   return objects;
 }
 
-export async function streamBackup(output: Writable): Promise<void> {
+// An upper bound on the size of the ZIP streamBackup writes. Proof objects are stored
+// as they are; the manifest is deflated, which can grow incompressible input by at most
+// zlib's most conservative deflateBound() margin.
+export function estimateBackupArchiveBytes(
+  manifestBytes: number,
+  objects: Record<string, { sizeBytes: number }>
+): number {
+  const entryBytes = (name: string, dataBytes: number) =>
+    ZIP_ENTRY_OVERHEAD_BYTES + 2 * Buffer.byteLength(name) + dataBytes;
+  const deflatedManifestBytes =
+    manifestBytes +
+    Math.floor(manifestBytes / 8) +
+    Math.floor(manifestBytes / 256) +
+    Math.floor(manifestBytes / 512) +
+    4;
+  let total = ZIP_END_OVERHEAD_BYTES + entryBytes(BACKUP_MANIFEST, deflatedManifestBytes);
+  for (const [name, { sizeBytes }] of Object.entries(objects)) {
+    total += entryBytes(name, sizeBytes);
+  }
+  return total;
+}
+
+// Applies the limits restoreBackupFromFile enforces, so an export never produces a
+// ZIP that this instance would refuse to restore.
+function assertRestorable(
+  data: BackupData,
+  manifest: Buffer,
+  objects: BackupObjectMetadata
+): void {
+  const objectSizes = Object.values(objects).map(({ sizeBytes }) => sizeBytes);
+  const rows = Object.values(data).reduce((total, tableRows) => total + tableRows.length, 0);
+  const uncompressed = objectSizes.reduce((total, size) => total + size, manifest.byteLength);
+  const archiveBytes = estimateBackupArchiveBytes(manifest.byteLength, objects);
+  const limits = [
+    ["rows", rows, MAX_BACKUP_ROWS],
+    ["entries", 1 + objectSizes.length, MAX_BACKUP_ENTRIES],
+    ["uncompressed_bytes", uncompressed, MAX_BACKUP_UNCOMPRESSED_BYTES],
+    ["archive_bytes", archiveBytes, MAX_BACKUP_ARCHIVE_BYTES]
+  ] as const;
+  const exceeded = limits.find(([, value, maximum]) => value > maximum);
+  if (exceeded) {
+    throw new AppError(
+      413,
+      "backup_too_large",
+      "This instance holds more data than a website backup can restore; use a /data volume snapshot instead",
+      { limit: exceeded[0], value: exceeded[1], maximum: exceeded[2] }
+    );
+  }
+}
+
+// Everything that can make the backup unrestorable is checked before `onStart` runs
+// and before the first byte reaches `output`, which is left untouched on those
+// failures so an HTTP caller can still answer with an ordinary error response.
+export async function streamBackup(output: Writable, onStart?: () => void): Promise<void> {
   return withBackupOperation("export", async () => {
     const data = await readBackupData();
     const objects = await buildBackupObjectMetadata(data.proofAssets);
@@ -515,31 +576,41 @@ export async function streamBackup(output: Writable): Promise<void> {
       throw new AppError(
         413,
         "backup_manifest_too_large",
-        "The database manifest is too large to export safely"
+        "The database manifest is too large to export safely; use a /data volume snapshot instead"
       );
     }
+    assertRestorable(data, manifest, objects);
+    onStart?.();
 
     const archive = new ZipArchive({
       zlib: { level: 6 },
       forceZip64: true
     });
-    archive.pipe(output);
-    const archiveDone = finished(archive);
-    const outputDone = finished(output);
-    archive.once("warning", (error) => archive.emit("error", error));
+    let source: ReadStream | null = null;
+    // pipeline() destroys both streams as soon as either fails, for example when
+    // the client disconnects, and settles once they are closed.
+    const writing = pipeline(archive, output);
     try {
       archive.append(manifest, { name: BACKUP_MANIFEST });
       for (const archiveName of Object.keys(objects)) {
-        const objectKey = archiveName.slice("objects/".length);
+        // archiver starts reading a stream as soon as it is appended, so each proof
+        // file is opened only after the entry before it is written.
+        await Promise.race([once(archive, "entry"), writing]);
+        source = createReadStream(getObjectPath(archiveName.slice("objects/".length)));
+        // archiver pipes the stream onward without listening for its errors.
+        source.on("error", (error) => archive.destroy(error));
         const entry: ZipEntryData = { name: archiveName, store: true };
-        archive.file(getObjectPath(objectKey), entry);
+        archive.append(source, entry);
       }
-      await archive.finalize();
-      await Promise.all([archiveDone, outputDone]);
+      // finalize() never settles once the output is gone, so it is only awaited
+      // together with the pipeline, which always does.
+      await Promise.all([archive.finalize(), writing]);
     } catch (error) {
+      // The output goes first, so a failed export never ends like a complete one.
+      output.destroy();
       archive.abort();
-      output.destroy(error instanceof Error ? error : new Error("Backup export failed"));
-      await Promise.allSettled([archiveDone, outputDone]);
+      source?.destroy();
+      await writing.catch(() => undefined);
       throw error;
     }
   });
@@ -547,9 +618,14 @@ export async function streamBackup(output: Writable): Promise<void> {
 
 export async function exportBackupToFile(filePath: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const output = createWriteStream(filePath, { flags: "wx", mode: 0o600 });
+  // Fails without touching a file that already exists at this path.
+  await once(output, "open");
   try {
-    await streamBackup(createWriteStream(filePath, { flags: "wx", mode: 0o600 }));
+    await streamBackup(output);
   } catch (error) {
+    output.destroy();
+    await finished(output).catch(() => undefined);
     await fs.rm(filePath, { force: true });
     throw error;
   }

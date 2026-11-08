@@ -405,15 +405,18 @@ router.get(
   "/backup/export",
   asyncRoute(async (_request, response) => {
     const stamp = new Date().toISOString().slice(0, 10);
-    response.set({
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="phosphene-backup-${stamp}.zip"`,
-      "Cache-Control": "no-store"
-    });
     try {
-      await streamBackup(response);
+      // The download headers are set only once the backup is known to be
+      // restorable, so a refusal still reaches the browser as a JSON error.
+      await streamBackup(response, () => {
+        response.set({
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="phosphene-backup-${stamp}.zip"`,
+          "Cache-Control": "no-store"
+        });
+      });
     } catch (error) {
-      if (response.headersSent) {
+      if (response.headersSent || response.destroyed) {
         response.destroy(error instanceof Error ? error : undefined);
         return;
       }
