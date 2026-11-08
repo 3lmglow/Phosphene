@@ -55,7 +55,8 @@ import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { SUPPORTED_TIMEZONES, TIMEZONE_OPTIONS } from "../shared/constants";
 import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
-import { api, idempotencyKey } from "./api";
+import { api } from "./api";
+import { createRetryKeys, isDefinitiveRejection } from "./idempotency";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
 import { ActivityCalendar, type ActivityCalendarData, WeekStrip } from "./ActivityCalendar";
 import { ConfirmProvider, Modal, useConfirm } from "./Dialog";
@@ -652,6 +653,23 @@ function AppShell({
   const location = useLocation();
   useEffect(() => setMobileOpen(false), [location.pathname]);
   const updates = useLoad<UpdateStatus>(() => api("/updates"), []);
+  const revalidateUpdates = updates.revalidate;
+  // The server asks GitHub on its own schedule (30-90 seconds after it starts, then every 12 hours). Asking our
+  // own server again when the page comes back into view, and every half hour while it stays open, lets the
+  // red dot show up without a reload. Only the local server is asked; it never reaches GitHub because of this.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void revalidateUpdates();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void revalidateUpdates();
+    }, 30 * 60_000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [revalidateUpdates]);
   const updateAvailable = Boolean(updates.data?.update_available);
   const nav = [
     ["/", "今日", LayoutDashboard],
@@ -1253,6 +1271,9 @@ function TasksPage({ aiLabel }: { aiLabel: string }) {
   );
 }
 
+// Kept outside the page so a retry still finds its key after the user has looked at another tab in between.
+const redeemKeys = createRetryKeys("redeem");
+
 function RewardsPage({ aiLabel }: { aiLabel: string }) {
   const overview = useLoad<Overview>(() => api("/overview"), []);
   const rewards = useLoad<any[]>(() => api("/rewards"), []);
@@ -1292,13 +1313,22 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
     }))) return;
     setRedeeming(item.id);
     try {
-      await api(`/rewards/${item.id}/redeem`, {
+      const result = await api<{ redemption?: { id: string } }>(`/rewards/${item.id}/redeem`, {
         method: "POST",
-        body: { idempotency_key: idempotencyKey("redeem") }
+        body: { idempotency_key: redeemKeys.get(item.id) }
       });
-      setNotice(`兑换成功，${item.cost} 积分已扣除。现在等待 ${visibleAiLabel} 履行“${item.name}”。`);
+      redeemKeys.forget(item.id);
+      // A retry whose first attempt had in fact gone through gets that earlier redemption back; say so
+      // rather than claiming points were taken again.
+      const alreadyListed = redemptions.data?.some((row) => row.id === result.redemption?.id) ?? false;
+      setNotice(
+        alreadyListed
+          ? `上次兑换“${item.name}”其实已经成功，积分只扣了一次。想再兑换一次的话，请重新点“兑换”。`
+          : `兑换成功，${item.cost} 积分已扣除。现在等待 ${visibleAiLabel} 履行“${item.name}”。`
+      );
       await sync();
     } catch (reason) {
+      if (isDefinitiveRejection(reason)) redeemKeys.forget(item.id);
       setNotice(reason instanceof Error ? reason.message : "兑换失败。");
     } finally {
       setRedeeming(null);
