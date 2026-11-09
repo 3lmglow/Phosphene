@@ -29,15 +29,23 @@ type Status = {
 // The server's own GitHub check finishes while the page is open: from then on /updates reports a new version.
 function mockServer() {
   let status: Status = { enabled: true, current_version: "1.4.0", latest: null, update_available: false, checked_at: null, check_failed: false };
+  let statusAsked!: () => void;
+  const firstStatusRequest = new Promise<void>((resolve) => {
+    statusAsked = resolve;
+  });
   vi.mocked(api).mockImplementation(async (path) => {
     if (path === "/bootstrap") return { initialized: true, timezone: "Asia/Shanghai", user_label: "你", ai_label: "AI" };
     if (path === "/me") return { authenticated: true };
-    if (path === "/updates") return status;
+    if (path === "/updates") {
+      statusAsked();
+      return status;
+    }
     if (path === "/overview") return { labels: { user: "你", ai: "AI" }, statistics: { balance: 0 } };
     if (path === "/rewards" || path === "/redemptions") return [];
     throw new Error(`Unexpected request ${path}`);
   });
   return {
+    firstStatusRequest,
     publishRelease() {
       status = {
         ...status,
@@ -50,14 +58,17 @@ function mockServer() {
   };
 }
 
-async function openApp() {
+// The page can show up before React has run its effects, which is where it first asks for the version status and
+// starts listening for the page coming back into view; wait for that request rather than assume it was quick.
+async function openApp(server: ReturnType<typeof mockServer>) {
   render(<MemoryRouter initialEntries={["/rewards"]}><App /></MemoryRouter>);
   await screen.findByRole("heading", { name: "兑换", level: 1 });
+  await server.firstStatusRequest;
 }
 
 it("asks the server for the version status again when the page comes back into view", async () => {
   const server = mockServer();
-  await openApp();
+  await openApp(server);
   expect(server.statusRequests()).toBe(1);
   expect(screen.queryByRole("img", { name: "有新版本" })).toBeNull();
 
@@ -75,7 +86,7 @@ it("asks the server for the version status again when the page comes back into v
 it("asks again every half hour while the page stays open, but not while it is hidden", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   const server = mockServer();
-  await openApp();
+  await openApp(server);
   expect(server.statusRequests()).toBe(1);
 
   server.publishRelease();

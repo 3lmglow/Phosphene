@@ -7,7 +7,7 @@ import { finished } from "node:stream/promises";
 import { ZipArchive, type ZipEntryData } from "archiver";
 import { eq } from "drizzle-orm";
 import sharp from "sharp";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openPromise } from "yauzl";
 import { config } from "../src/server/config";
 import { initializeDatabase, getDb, shutdownDatabase } from "../src/server/db/client";
@@ -979,7 +979,9 @@ describe.sequential("Phosphene domain integration", () => {
       responseStatus = 503;
       const testEvent = await createWebhookTestEvent();
       const failedAt = Date.now();
-      const failedClaim = await claimWebhookDelivery();
+      // The delivery's ready time comes from SQLite's clock, which can be a millisecond ahead of Date.now(); claim
+      // as of a moment that is surely after it was queued.
+      const failedClaim = await claimWebhookDelivery(new Date(failedAt + 1_000));
       expect(failedClaim?.event.id).toBe(testEvent.event_id);
       await deliverWebhookClaim(failedClaim!);
       const failed = await getDb().query.webhookDeliveries.findFirst({
@@ -1210,8 +1212,8 @@ describe.sequential("Phosphene domain integration", () => {
       completed = true;
     });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(getActiveBackupOperation()).toBe("export");
+      // The export opens its output file before it takes the lock, which can take a while on a busy machine.
+      await vi.waitFor(() => expect(getActiveBackupOperation()).toBe("export"), { timeout: 5_000, interval: 10 });
       expect(completed).toBe(false);
       expect(() => beginApplicationRequest()).toThrowError(/temporarily unavailable/i);
     } finally {

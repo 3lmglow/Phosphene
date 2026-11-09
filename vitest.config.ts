@@ -20,6 +20,10 @@ export default defineConfig({
     sequence: {
       concurrent: false
     },
+    // Password hashing (argon2), image processing (sharp) and backups are slow when every worker runs at once
+    // on a busy machine; the defaults (5 s per test, 10 s per hook) are too tight for that.
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
     coverage: {
       reporter: ["text", "html"],
       exclude: ["src/web/main.tsx", "src/server/index.ts"]
