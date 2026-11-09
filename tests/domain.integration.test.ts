@@ -17,6 +17,7 @@ import {
   auditLogs,
   dailyActivity,
   domainEvents,
+  idempotencyKeys,
   pointLedger,
   proofAssets,
   rewardItems,
@@ -590,6 +591,13 @@ describe.sequential("Phosphene domain integration", () => {
     const retry = await redeemReward("reward_writing", "integration-redeem-writing");
     expect(retry.redemption.id).toBe(first.redemption.id);
     expect(retry.balance).toBe(first.balance);
+    // The page uses this to tell the user an earlier, lost attempt had already gone through.
+    expect(first.replayed).toBe(false);
+    expect(retry.replayed).toBe(true);
+    const stored = await getDb().query.idempotencyKeys.findFirst({
+      where: eq(idempotencyKeys.key, "integration-redeem-writing")
+    });
+    expect(stored?.response).not.toHaveProperty("replayed");
     expect(first.redemption.status).toBe("pending");
     expect(first.redemption.itemNameSnapshot).toBe("指定 星沉 写东西");
     expect((await getOverview()).statistics.balance).toBe(5);

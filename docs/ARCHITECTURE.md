@@ -94,6 +94,8 @@ Webhook worker 先用普通查询确认已启用且有到期投递，才开启�
 
 同一 key、operation 和请求内容的重试返回原响应。operation 或内容变化时返回冲突。业务表上的唯一约束继续提供第二层一致性保护。
 
+网页兑换接口 `POST /api/rewards/:rewardId/redeem` 的回复另带 `replayed`：第一次兑换为 `false`，同一 key 重放原响应时为 `true`，网页据此提示“上次其实已经成功”。这个字段不写入 `idempotency_keys`。
+
 ## MCP 边界
 
 `/mcp` 提供无状态 Streamable HTTP。默认认证为静态 AI Token：

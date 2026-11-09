@@ -56,7 +56,7 @@ import { SUPPORTED_TIMEZONES, TIMEZONE_OPTIONS } from "../shared/constants";
 import { presentRewardSnapshot } from "../shared/rewards";
 import { newPasswordSchema, PASSWORD_REQUIREMENTS } from "../shared/schemas";
 import { api } from "./api";
-import { createRetryKeys, isDefinitiveRejection } from "./idempotency";
+import { createRetryKeys, isRedemptionRefusal } from "./idempotency";
 import { emptyRecoveryDraft, PasswordRecovery, RecoveryFields, RecoverySettings, recoveryDraftError } from "./Recovery";
 import { ActivityCalendar, type ActivityCalendarData, WeekStrip } from "./ActivityCalendar";
 import { ConfirmProvider, Modal, useConfirm } from "./Dialog";
@@ -1312,23 +1312,23 @@ function RewardsPage({ aiLabel }: { aiLabel: string }) {
       confirmLabel: "兑换"
     }))) return;
     setRedeeming(item.id);
+    const key = redeemKeys.get(item.id);
     try {
-      const result = await api<{ redemption?: { id: string } }>(`/rewards/${item.id}/redeem`, {
+      const result = await api<{ replayed?: boolean }>(`/rewards/${item.id}/redeem`, {
         method: "POST",
-        body: { idempotency_key: redeemKeys.get(item.id) }
+        body: { idempotency_key: key }
       });
-      redeemKeys.forget(item.id);
-      // A retry whose first attempt had in fact gone through gets that earlier redemption back; say so
-      // rather than claiming points were taken again.
-      const alreadyListed = redemptions.data?.some((row) => row.id === result.redemption?.id) ?? false;
+      redeemKeys.forget(item.id, key);
+      // A retry whose first attempt had in fact gone through gets that earlier answer back, and the server says
+      // so; tell the user rather than claiming points were taken again.
       setNotice(
-        alreadyListed
+        result.replayed
           ? `上次兑换“${item.name}”其实已经成功，积分只扣了一次。想再兑换一次的话，请重新点“兑换”。`
           : `兑换成功，${item.cost} 积分已扣除。现在等待 ${visibleAiLabel} 履行“${item.name}”。`
       );
       await sync();
     } catch (reason) {
-      if (isDefinitiveRejection(reason)) redeemKeys.forget(item.id);
+      if (isRedemptionRefusal(reason)) redeemKeys.forget(item.id, key);
       setNotice(reason instanceof Error ? reason.message : "兑换失败。");
     } finally {
       setRedeeming(null);

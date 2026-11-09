@@ -143,6 +143,17 @@ async function idempotent<T extends Record<string, unknown>>(
   request: unknown,
   work: () => Promise<T>
 ): Promise<T> {
+  return (await idempotentOutcome(tx, operation, key, request, work)).response;
+}
+
+// Also reports whether the response is the stored one from an earlier request with this key.
+async function idempotentOutcome<T extends Record<string, unknown>>(
+  tx: Db,
+  operation: string,
+  key: string,
+  request: unknown,
+  work: () => Promise<T>
+): Promise<{ response: T; replayed: boolean }> {
   const requestHash = sha256(JSON.stringify(canonicalJson(request)));
   const existing = await tx.query.idempotencyKeys.findFirst({
     where: eq(idempotencyKeys.key, key)
@@ -154,11 +165,11 @@ async function idempotent<T extends Record<string, unknown>>(
       "idempotency_payload_conflict",
       "This idempotency key was already used with different request values"
     );
-    return existing.response as T;
+    return { response: existing.response as T, replayed: true };
   }
   const response = await work();
   await tx.insert(idempotencyKeys).values({ key, operation, requestHash, response });
-  return response;
+  return { response, replayed: false };
 }
 
 function canonicalJson(value: unknown): unknown {
@@ -1436,7 +1447,7 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
   return runTransaction(async (tx: Db) => {
     // Settle overdue penalties first, so spending cannot empty the balance they were owed from.
     await reconcileInTransaction(tx);
-    return idempotent(tx, "redeem_reward", idempotencyKey, { reward_id: rewardId }, async () => {
+    const { response, replayed } = await idempotentOutcome(tx, "redeem_reward", idempotencyKey, { reward_id: rewardId }, async () => {
       const settings = await getSettings(tx);
       const reward = assertFound(
         await tx.query.rewardItems.findFirst({ where: and(eq(rewardItems.id, rewardId), eq(rewardItems.active, true)) }),
@@ -1480,6 +1491,9 @@ export async function redeemReward(rewardId: string, idempotencyKey: string) {
       await recomputeActivityAndStats(tx);
       return { redemption, balance: balance - reward.cost };
     });
+    // Lets a page that retried after a lost reply tell the user the earlier redemption went through. Added
+    // after the stored response, so it is never saved with it.
+    return { ...response, replayed };
   });
 }
 

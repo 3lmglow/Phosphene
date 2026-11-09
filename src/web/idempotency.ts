@@ -14,14 +14,20 @@ export function createRetryKeys(prefix: string) {
       }
       return key;
     },
-    forget(intent: string) {
-      keys.delete(intent);
+    // Drops the key only if it is still the one that attempt sent: a late reply to an older attempt must not
+    // throw away the key of a newer one that is still waiting for its answer.
+    forget(intent: string, key: string) {
+      if (keys.get(intent) === key) keys.delete(intent);
     }
   };
 }
 
-// A 4xx carrying the server's own error code means it read the request and turned it down, so nothing happened.
-// No connection, a 5xx or a reply that could not be read ("request_failed" in api.ts) leave the outcome unknown.
-export function isDefinitiveRejection(reason: unknown) {
-  return reason instanceof ApiError && reason.status >= 400 && reason.status < 500 && reason.code !== "request_failed";
+// Refusals the redemption itself gives once the server has looked the key up: the reward is gone or archived,
+// there are not enough points, or the key belongs to another request. Only these prove the key never went
+// through. Anything turned away before that lookup (signed out, CSRF, rate limits, a body the server would not
+// read) or with no readable answer says nothing about an earlier attempt, so the key is kept.
+const REDEMPTION_REFUSALS = new Set(["not_found", "insufficient_points", "idempotency_conflict", "idempotency_payload_conflict"]);
+
+export function isRedemptionRefusal(reason: unknown) {
+  return reason instanceof ApiError && REDEMPTION_REFUSALS.has(reason.code);
 }
