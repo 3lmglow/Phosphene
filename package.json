@@ -1,6 +1,6 @@
 {
   "name": "phosphene",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "type": "module",
   "description": "A private, self-hosted task, reward, and companionship system for one user and one AI.",
@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:web-entry": "node --test tests/production-web.smoke.mjs",
     "validate:deployment": "node scripts/validate-deployment.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm validate:deployment && pnpm build"
   },

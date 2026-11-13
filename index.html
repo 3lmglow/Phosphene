@@ -18,7 +18,14 @@
     <title>Phosphene</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- React replaces this on startup. Keep it readable even when the browser cannot load any assets. -->
+      <main style="max-width: 32rem; margin: 12vh auto; padding: 0 1.25rem; font: 1rem/1.65 system-ui, sans-serif; color: #1f2433">
+        <h1>正在打开 Phosphene</h1>
+        <p>如果地址以 <code>http://</code> 开头，请改用平台、Caddy 或面板提供的 <strong>HTTPS 地址</strong>。不要直接打开容器的 8080 端口。</p>
+        <p>如果已经是 HTTPS，却一直停在这里，请刷新页面，或用浏览器的无痕窗口重新打开。</p>
+      </main>
+    </div>
     <script type="module" src="/src/web/main.tsx"></script>
   </body>
 </html>

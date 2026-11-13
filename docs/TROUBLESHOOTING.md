@@ -55,6 +55,12 @@ Docker Compose 默认为 Phosphene 设置 512M 内存上限，超过时只会重
 
 ## HTTPS
 
+### 首页和脚本用 curl 都是 200，但手机白屏或一直显示“正在打开 Phosphene”
+
+先看手机地址栏。若是 `http://服务器IP:8080`，请改用部署平台、Caddy 或面板提供的 **HTTPS 网站地址**。生产页面会要求浏览器通过 HTTPS 加载脚本，但容器的 8080 只提供 HTTP。用 curl 单独下载 HTTP 脚本可以成功，不代表手机能运行它；不要关闭安全策略，也不用重装或删除数据卷。
+
+若已经是 HTTPS，先刷新或用系统浏览器的无痕窗口打开。仍有问题时，在浏览器网络面板查看**该首页实际引用的** `/assets/…js`：正常应为 `200` 且 `Content-Type` 是 JavaScript。`404` 表示那个文件不存在，更新后常见于缓存了旧首页；如果返回 `200 text/html`，拿到的则是 HTML，不是脚本。检查反代/CDN 是否缓存了旧首页、把资源请求改写到了首页，以及首页和资源是否来自同一版部署。若资源类型正确，记录 `/healthz` 中的版本、手机系统和浏览器版本，以及控制台第一条报错即可。
+
 ### 打开 `https://服务器IP` 失败
 
 1. 确认启动时带了 `--profile https`，并且 `.env` 中的 `PHOSPHENE_HOST` 是服务器的公网 IP 或域名。
@@ -70,7 +76,7 @@ Docker Compose 默认为 Phosphene 设置 512M 内存上限，超过时只会重
 
 ### 之前能访问 `服务器IP:8080`，更新后不能访问了
 
-新版 Docker Compose 默认只在 `127.0.0.1:8080` 提供 HTTP。改用 `https://服务器IP`（需要 `--profile https`），或通过面板反向代理；确实需要从其他机器访问 8080 时，在 `.env` 中设置 `PHOSPHENE_BIND=0.0.0.0`。
+新版 Docker Compose 默认只在 `127.0.0.1:8080` 提供 HTTP。浏览器请改用 `https://服务器IP`（需要 `--profile https`）或面板反向代理的 HTTPS 地址。只有反代需要跨容器访问时才调整 `PHOSPHENE_BIND`；不要为手机直连把 8080 对外开放。
 
 ### `ENOSPC` / no space left on device
 

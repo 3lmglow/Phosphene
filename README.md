@@ -63,7 +63,7 @@ ghcr.io/你的用户名/phosphene:main
 部署完成后访问 `https://你的地址/healthz`，应返回类似：
 
 ```json
-{"status":"ok","version":"1.3.0"}
+{"status":"ok","version":"1.3.1"}
 ```
 
 每一步的详细操作、更新和回滚见 [部署与运维](docs/DEPLOYMENT.md)。
@@ -173,7 +173,7 @@ cd Phosphene
 docker compose up -d --build
 ```
 
-打开 `http://localhost:8080`。Compose 会创建 `phosphene-data` 命名卷并挂载到 `/data`。
+在运行 Docker 的电脑上可用 `http://localhost:8080` 本机预览。手机或其他设备请打开部署平台、Caddy 或面板提供的 **HTTPS 地址**，不要直接打开 `http://服务器IP:8080`。Compose 会创建 `phosphene-data` 命名卷并挂载到 `/data`。
 
 部署到服务器时，使用 `docker.env.example` 配置你的镜像和公网 IP，并通过 `docker compose --profile https up -d` 自动启用 HTTPS，步骤见 [部署与运维](docs/DEPLOYMENT.md#方式二自己的服务器--docker-compose)。
 
@@ -200,6 +200,8 @@ pnpm check
 ```
 
 它会依次执行类型检查、测试、部署清单验证和生产构建。
+
+在**尚未首次设置的生产模式测试实例**启动后，可以另跑 `pnpm test:web-entry` 检查首页、脚本和缺失资源。默认访问 `http://127.0.0.1:8080`，用 `PHOSPHENE_TEST_ORIGIN` 指定其他入口；设置 `PHOSPHENE_TEST_CHROME` 为 Chrome 可执行文件路径，还会验证浏览器能显示首次设置表单。CI 会对新构建的 Compose 容器运行这组检查。
 
 ## 文档
 

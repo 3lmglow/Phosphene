@@ -136,6 +136,7 @@ if (config.NODE_ENV === "development") {
   app.use(
     express.static(webRoot, {
       index: false,
+      redirect: false,
       maxAge: "1y",
       immutable: true,
       setHeaders(response, filePath) {
@@ -147,7 +148,15 @@ if (config.NODE_ENV === "development") {
       }
     })
   );
-  app.use((_request, response) => {
+  app.use((request, response) => {
+    // Only page navigations get the SPA shell. Never turn a missing bundle into 200 text/html.
+    response.vary("Accept");
+    const isPage = (request.method === "GET" || request.method === "HEAD") &&
+      request.accepts("html") && /^\/(?!assets(?:\/|$)|icons(?:\/|$))[^.]*$/i.test(request.path);
+    if (!isPage) {
+      response.set("Cache-Control", "no-store").status(404).type("text").send("Not found");
+      return;
+    }
     response.set("Cache-Control", "no-cache");
     response.sendFile(path.join(webRoot, "index.html"));
   });

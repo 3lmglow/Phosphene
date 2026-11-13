@@ -1,5 +1,5 @@
-const SHELL_CACHE = "phosphene-shell-v4";
-const RUNTIME_CACHE = "phosphene-runtime-v4";
+const SHELL_CACHE = "phosphene-shell-v5";
+const RUNTIME_CACHE = "phosphene-runtime-v5";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -25,7 +25,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
+            .filter((key) => /^phosphene-(shell|runtime)-/.test(key) && key !== SHELL_CACHE && key !== RUNTIME_CACHE)
             .map((key) => caches.delete(key))
         )
       )
@@ -52,16 +52,19 @@ async function navigationResponse(request) {
     }
     return response;
   } catch {
-    return (await caches.match("/")) || Response.error();
+    const cache = await caches.open(SHELL_CACHE);
+    return (await cache.match("/")) || Response.error();
   }
 }
 
 async function staticResponse(request) {
-  const cached = await caches.match(request);
+  const cache = await caches.open(RUNTIME_CACHE);
+  const cached = await cache.match(request);
   const update = fetch(request)
     .then(async (response) => {
-      if (response.ok) {
-        const cache = await caches.open(RUNTIME_CACHE);
+      // A proxy may still return its HTML fallback with status 200 for a missing asset.
+      const mime = response.headers.get("Content-Type")?.split(";", 1)[0].trim().toLowerCase();
+      if (response.ok && mime !== "text/html" && mime !== "application/xhtml+xml") {
         await cache.put(request, response.clone());
       }
       return response;
