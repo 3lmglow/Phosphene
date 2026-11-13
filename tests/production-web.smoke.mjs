@@ -1,11 +1,6 @@
 // Run against a freshly started production instance (CI uses the Compose container).
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
-import { promisify } from "node:util";
 
 const origin = process.env.PHOSPHENE_TEST_ORIGIN ?? "http://127.0.0.1:8080";
 const request = (path, options) => fetch(new URL(path, origin), options);
@@ -70,16 +65,17 @@ test("a stale HTML entry receives a non-cacheable, non-HTML 404, even on direct 
 // The Linux Compose CI has Chrome. Without a browser the HTTP-level tests above still run.
 const chrome = process.env.PHOSPHENE_TEST_CHROME;
 test("a browser replaces the startup hint with the first-time setup form", { skip: !chrome }, async () => {
-  const profile = await mkdtemp(join(tmpdir(), "phosphene-smoke-"));
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ executablePath: chrome, chromiumSandbox: true });
   try {
-    const { stdout } = await promisify(execFile)(chrome, [
-      "--headless", "--disable-background-networking", "--no-first-run", `--user-data-dir=${profile}`,
-      "--window-size=390,844", "--virtual-time-budget=5000", "--dump-dom", origin
-    ], { timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
-    assert.match(stdout.replaceAll(/<!--[\s\S]*?-->/g, ""), /首次设置\s*·\s*1\s*\/\s*3/);
-    assert.match(stdout, /<input\b[^>]*type="password"/);
-    assert.doesNotMatch(stdout, /正在打开 Phosphene/);
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    page.on("pageerror", (error) => console.error("Browser error:", error.message));
+    const entry = await page.goto(origin, { waitUntil: "domcontentloaded" });
+    assert.equal(entry?.status(), 200);
+    await page.getByText(/首次设置\s*·\s*1\s*\/\s*3/).waitFor({ state: "visible", timeout: 30_000 });
+    assert.equal(await page.locator('input[type="password"]').first().isVisible(), true);
+    assert.equal(await page.getByRole("heading", { name: "正在打开 Phosphene" }).count(), 0);
   } finally {
-    await rm(profile, { recursive: true, force: true });
+    await browser.close();
   }
 });

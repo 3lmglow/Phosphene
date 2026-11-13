@@ -146,6 +146,9 @@ importers:
       jsdom:
         specifier: 26.1.0
         version: 26.1.0
+      playwright-core:
+        specifier: 1.65.0
+        version: 1.65.0
       tsx:
         specifier: 4.20.3
         version: 4.20.3
@@ -1949,6 +1952,11 @@ packages:
   pkce-challenge@5.0.1:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
+
+  playwright-core@1.65.0:
+    resolution: {integrity: sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   postcss@8.5.29:
     resolution: {integrity: sha512-49cGhUbXj8Qenv0iTMxA1cFBzxXoctpC9Ujd77t1WcbJIr6nF/eI7g/8MgxrYldFRuAXvja7xQRwavoW7kgrxQ==}
@@ -3974,6 +3982,8 @@ snapshots:
       thread-stream: 3.2.0
 
   pkce-challenge@5.0.1: {}
+
+  playwright-core@1.65.0: {}
 
   postcss@8.5.29:
     dependencies:

@@ -34,6 +34,15 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - name: Install test client dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Validate Compose configuration
         run: |
           docker compose config --quiet
@@ -43,9 +52,10 @@ jobs:
       - name: Wait for health
         run: curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 3 http://127.0.0.1:8080/healthz
       - name: Check the production web entry and asset responses
-        env:
-          PHOSPHENE_TEST_CHROME: google-chrome
-        run: node --test tests/production-web.smoke.mjs
+        run: |
+          export PHOSPHENE_TEST_CHROME="$(command -v google-chrome)"
+          test -x "$PHOSPHENE_TEST_CHROME"
+          pnpm test:web-entry
       - name: Keep data across container recreation
         run: |
           curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/setup \
